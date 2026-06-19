@@ -103,21 +103,36 @@ def vad_chunks(audio, max_chunk_s: float = 25.0) -> List[Dict]:
     where 'audio' is the contiguous slice for that chunk and start/end are
     absolute times in the original file.
     """
-    from faster_whisper.vad import get_speech_timestamps
+    from faster_whisper.vad import VadOptions, get_speech_timestamps
 
-    speech = get_speech_timestamps(audio, sampling_rate=SAMPLE_RATE)
+    max_samples = int(max_chunk_s * SAMPLE_RATE)
+
+    # Silero's default max_speech_duration_s is inf, so a continuous broadcast
+    # comes back as ONE giant region. Cap it at the chunk budget so VAD splits
+    # long speech at natural pauses.
+    vad_opts = VadOptions(max_speech_duration_s=max_chunk_s)
+    speech = get_speech_timestamps(audio, vad_options=vad_opts, sampling_rate=SAMPLE_RATE)
 
     # No speech detected (e.g. music-only or over-aggressive VAD): fall back to
     # treating the whole file as a single chunk so we never silently drop audio.
     if not speech:
-        return [{"start": 0.0, "end": len(audio) / SAMPLE_RATE, "audio": audio}]
+        speech = [{"start": 0, "end": len(audio)}]
 
-    max_samples = int(max_chunk_s * SAMPLE_RATE)
+    # Defensive hard-split: if any region still exceeds the budget (e.g. a VAD
+    # version that ignores max_speech_duration_s), cut it into budget-sized pieces.
+    regions: List[Dict] = []
+    for r in speech:
+        s, e = r["start"], r["end"]
+        while e - s > max_samples:
+            regions.append({"start": s, "end": s + max_samples})
+            s += max_samples
+        regions.append({"start": s, "end": e})
+
     chunks: List[Dict] = []
-    cur_start = speech[0]["start"]
-    cur_end = speech[0]["end"]
+    cur_start = regions[0]["start"]
+    cur_end = regions[0]["end"]
 
-    for region in speech[1:]:
+    for region in regions[1:]:
         # Extend the current chunk if it still fits within the size budget.
         if region["end"] - cur_start <= max_samples:
             cur_end = region["end"]
