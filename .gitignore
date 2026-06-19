@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Model caches (faster-whisper / huggingface download large weights)
+models/
+*.bin
+*.ct2
+.cache/
+
+# Local media + generated subtitles (keep the repo about code, not data)
+samples/*
+!samples/.gitkeep
+out/
+*.srt
+*.mp3
+*.mp4
+*.wav
+*.m4a
+*.mka
+*.mkv
