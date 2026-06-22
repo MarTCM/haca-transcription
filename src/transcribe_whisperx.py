@@ -230,8 +230,6 @@ def transcribe_file(
                 chunk["audio"],
                 language=whisper_lang,
                 batch_size=batch_size,
-                vad_filter=False,
-                condition_on_previous_text=False,
                 beam_size=beam_size,
             )
         except TypeError:
@@ -239,8 +237,6 @@ def transcribe_file(
                 chunk["audio"],
                 language=whisper_lang,
                 batch_size=batch_size,
-                vad_filter=False,
-                condition_on_previous_text=False,
             )
 
         effective_lang = result.get("language", chunk_lang or "?")
