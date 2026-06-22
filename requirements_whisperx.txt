@@ -1,3 +1,5 @@
 whisperx>=3.8.0
 pyannote.audio>=3.1.0
+transformers>=4.46.0
+peft>=0.14.0
 pytest>=8.0

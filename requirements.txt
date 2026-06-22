@@ -2,6 +2,10 @@
 # av/PyAV (media decoding, incl. video), onnxruntime + the bundled Silero VAD.
 faster-whisper>=1.1.0
 
+# Optional: Darija LoRA adapter (anaszil). Needed for --darija-lora.
+transformers>=4.46.0
+peft>=0.14.0
+
 # Optional GPU probe used by --device auto. faster-whisper does not require
 # torch, but if it is present we use it to detect a CUDA device.
 # torch  # install the build matching your CUDA (see README)

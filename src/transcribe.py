@@ -20,7 +20,11 @@ imports, and the SRT-writer tests work without it installed.
 CLI:
     python src/transcribe.py --input <file|dir> --out-dir out/ \
         [--model large-v3] [--device cuda|cpu|auto] [--lang auto|ar|fr] \
-        [--allowed ar,fr,en] [--max-chunk-s 25] [--beam-size 5] [--overwrite]
+        [--allowed ar,fr,en] [--max-chunk-s 25] [--beam-size 5] \
+        [--darija-lora] [--overwrite]
+
+    --darija-lora  Route Arabic chunks through the anaszil LoRA adapter
+                   (pip install transformers peft first).
 """
 
 import argparse
@@ -177,6 +181,94 @@ def detect_chunk_language(
 
 
 # --------------------------------------------------------------------------- #
+# Darija LoRA adapter (anaszil on large-v3-turbo)
+# --------------------------------------------------------------------------- #
+_darija_lora_cache = None
+
+
+def _load_darija_lora(
+    lora_model: str = "anaszil/whisper-large-v3-turbo-darija",
+    lora_base: str = "openai/whisper-large-v3-turbo",
+    device: Optional[str] = None,
+):
+    """Load the anaszil LoRA adapter as a singleton HF pipeline."""
+    global _darija_lora_cache
+    if _darija_lora_cache is not None:
+        return _darija_lora_cache
+    try:
+        import torch
+        from transformers import (
+            WhisperForConditionalGeneration, WhisperProcessor, pipeline,
+        )
+        from peft import PeftModel
+    except ImportError:
+        print(
+            "error: --darija-lora requires 'transformers' and 'peft'. Run:\n"
+            "  pip install transformers peft",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if device in (None, "auto"):
+        device = _auto_device()
+    dtype = torch.float16 if device == "cuda" else torch.float32
+    print(
+        f"[lora] loading adapter={lora_model} base={lora_base} device={device}",
+        file=sys.stderr,
+    )
+    base = WhisperForConditionalGeneration.from_pretrained(
+        lora_base, torch_dtype=dtype, low_cpu_mem_usage=True,
+    )
+    model = PeftModel.from_pretrained(base, lora_model)
+    processor = WhisperProcessor.from_pretrained(
+        lora_base, language="Arabic", task="transcribe",
+    )
+    pipe = pipeline(
+        "automatic-speech-recognition",
+        model=model,
+        tokenizer=processor.tokenizer,
+        feature_extractor=processor.feature_extractor,
+        chunk_length_s=30,
+        device=0 if device == "cuda" else -1,
+    )
+    _darija_lora_cache = pipe
+    return pipe
+
+
+def _transcribe_with_lora(
+    chunk_audio, pipe, offset: float, lang: str,
+) -> List[Dict]:
+    """Transcribe a single chunk via HF LoRA pipeline, return segment dicts."""
+    out = pipe(chunk_audio, return_timestamps=True)
+    text = out.get("text", "").strip()
+    if not text:
+        return []
+    chunks = out.get("chunks")
+    if chunks and isinstance(chunks, list):
+        segments = []
+        for c in chunks:
+            ts = c.get("timestamp")
+            t = c.get("text", "").strip()
+            if not t or not ts:
+                continue
+            start, end = ts
+            if start is None or end is None:
+                continue
+            segments.append({
+                "start": offset + start,
+                "end": offset + end,
+                "text": t,
+                "lang": lang,
+            })
+        return segments
+    return [{
+        "start": offset,
+        "end": offset + 0.1,
+        "text": text,
+        "lang": lang,
+    }]
+
+
+# --------------------------------------------------------------------------- #
 # Transcription
 # --------------------------------------------------------------------------- #
 def transcribe_file(
@@ -186,6 +278,8 @@ def transcribe_file(
     allowed: Sequence[str] = DEFAULT_ALLOWED,
     max_chunk_s: float = 25.0,
     beam_size: int = 5,
+    darija_lora: bool = False,
+    lora_pipe=None,
 ) -> List[Dict]:
     """
     Transcribe one media file into a list of segments:
@@ -193,6 +287,7 @@ def transcribe_file(
 
     lang='auto' -> per-chunk language detection (code-switching friendly).
     lang='ar'/'fr'/... -> force that language for every chunk.
+    darija_lora=True  -> route Arabic chunks through the anaszil LoRA adapter.
     """
     audio = decode_audio(path)
     chunks = vad_chunks(audio, max_chunk_s=max_chunk_s)
@@ -204,15 +299,26 @@ def transcribe_file(
             chunk_lang = detect_chunk_language(model, chunk["audio"], allowed)
         else:
             chunk_lang = lang
-        # 'auto' here means: let transcribe() detect (older fw without detect_language).
-        whisper_lang = None if chunk_lang == "auto" else chunk_lang
 
+        if darija_lora and chunk_lang == "ar":
+            lora_segs = _transcribe_with_lora(
+                chunk["audio"], lora_pipe, chunk["start"], "ar",
+            )
+            segments.extend(lora_segs)
+            print(
+                f"[asr] chunk {ci + 1}/{len(chunks)} lang=ar (lora) "
+                f"({len(lora_segs)} segs)",
+                file=sys.stderr,
+            )
+            continue
+
+        whisper_lang = None if chunk_lang == "auto" else chunk_lang
         result, info = model.transcribe(
             chunk["audio"],
             language=whisper_lang,
             beam_size=beam_size,
-            vad_filter=False,                 # already VAD-chunked
-            condition_on_previous_text=False, # avoid hallucination carry-over across chunks
+            vad_filter=False,
+            condition_on_previous_text=False,
         )
         effective_lang = whisper_lang or getattr(info, "language", "?")
         offset = chunk["start"]
@@ -267,6 +373,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--max-chunk-s", type=float, default=25.0,
                     help="Max chunk length in seconds (default: 25).")
     ap.add_argument("--beam-size", type=int, default=5)
+    ap.add_argument("--darija-lora", action="store_true",
+                    help="Route Arabic chunks through anaszil LoRA adapter for better Darija ASR.")
+    ap.add_argument("--lora-model", default="anaszil/whisper-large-v3-turbo-darija",
+                    help="LoRA adapter model (default: anaszil/whisper-large-v3-turbo-darija).")
+    ap.add_argument("--lora-base", default="openai/whisper-large-v3-turbo",
+                    help="Base model for the LoRA adapter (default: openai/whisper-large-v3-turbo).")
     ap.add_argument("--overwrite", action="store_true",
                     help="Re-transcribe even if the .srt already exists.")
     args = ap.parse_args(argv)
@@ -300,12 +412,17 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     model = load_model(args.model, args.device, args.compute_type)
 
+    lora_pipe = None
+    if args.darija_lora:
+        lora_pipe = _load_darija_lora(args.lora_model, args.lora_base, args.device)
+
     for f, srt_path in todo:
         print(f"[file] {f}", file=sys.stderr)
         segments = transcribe_file(
             str(f), model,
             lang=args.lang, allowed=allowed,
             max_chunk_s=args.max_chunk_s, beam_size=args.beam_size,
+            darija_lora=args.darija_lora, lora_pipe=lora_pipe,
         )
         write_srt(segments, srt_path)
         print(f"[srt ] {srt_path}  ({len(segments)} cues)", file=sys.stderr)

@@ -38,6 +38,8 @@ transcription/
 ```
 whisperx>=3.8.0
 pyannote.audio>=3.1.0
+transformers>=4.46.0       # required for --darija-lora
+peft>=0.14.0               # required for --darija-lora
 pytest>=8.0
 ```
 
@@ -660,7 +662,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="Re-transcribe even if .srt exists.")
 ```
 
-All CLI flags match `transcribe.py` where applicable, with five additions:
+All CLI flags match `transcribe.py` where applicable, with six additions:
 
 | Flag | Added for | Default | Meaning |
 |---|---|---|---|
@@ -669,6 +671,7 @@ All CLI flags match `transcribe.py` where applicable, with five additions:
 | `--hf-token` | WhisperX | None | HuggingFace read token (required for diarization) |
 | `--min-speakers` | WhisperX | None | Hint for diarization (speaker count floor) |
 | `--max-speakers` | WhisperX | None | Hint for diarization (speaker count ceiling) |
+| `--darija-lora` | both | off | Route Arabic chunks through anaszil LoRA adapter |
 
 The `--compute-type` flag is inherited (allows `int8` on low-VRAM GPUs or CPU).
 
@@ -755,6 +758,9 @@ python src/transcribe_whisperx.py --input clip.wav --model tiny --device cpu
 
 # Force French (skip per-chunk detection)
 python src/transcribe_whisperx.py --input journal.mp3 --lang fr
+
+# Best Darija quality via anaszil LoRA adapter (pip install transformers peft)
+python src/transcribe_whisperx.py --input show.mp4 --out-dir out/ --darija-lora
 ```
 
 ### With speaker diarization

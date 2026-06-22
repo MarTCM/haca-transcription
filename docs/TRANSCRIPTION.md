@@ -27,7 +27,8 @@ OpenAI's Whisper on the CTranslate2 inference engine. We use it because:
 We deliberately use the model **as-is** (no fine-tuning) in the base pipeline. However,
 benchmarking has identified [`anaszil/whisper-large-v3-turbo-darija`](https://huggingface.co/anaszil/whisper-large-v3-turbo-darija)
 (LoRA adapter on `large-v3-turbo`) as the best Darija ASR option — see
-`notebooks/kaggle_compare_darija_models2.ipynb`. The turbo model (`large-v3-turbo` via
+`notebooks/kaggle_compare_darija_models2.ipynb`. Use `--darija-lora` to route Arabic
+chunks through the adapter (see §8). The turbo model (`large-v3-turbo` via
 faster-whisper) is also a drop-in replacement that's faster than `large-v3` with
 comparable quality.
 
@@ -107,6 +108,42 @@ python src/transcribe.py --input broadcasts/ --out-dir out/
 
 # Force French; smaller model on CPU for a quick local check
 python src/transcribe.py --input clip.wav --model tiny --device cpu --lang fr
+
+# Best Darija quality with the anaszil LoRA adapter (requires transformers+peft)
+python src/transcribe.py --input show.mp4 --out-dir out/ --darija-lora
+
+# Same for WhisperX pipeline
+python src/transcribe_whisperx.py --input show.mp4 --out-dir out/ --darija-lora
+```
+
+## 8. LoRA adapter for Darija (`--darija-lora`)
+
+Use the [`anaszil/whisper-large-v3-turbo-darija`](https://huggingface.co/anaszil/whisper-large-v3-turbo-darija)
+adapter to improve Darija recognition. Benchmark results show it is **3.4× faster** than
+the MaghrebVoice fine-tune and produces cleaner transcriptions.
+
+**How it works:**
+
+1. `--darija-lora` loads the LoRA on top of `openai/whisper-large-v3-turbo` using
+   HuggingFace `transformers` + `PEFT`.
+2. During per-chunk transcription, any chunk detected as Arabic (`lang == "ar"`) is
+   routed through the LoRA pipeline instead of faster-whisper / WhisperX.
+3. French/English chunks continue through the original engine (CTranslate2).
+
+**Why not always use the LoRA?** It runs in PyTorch (HF pipeline), which is slower per
+token than CTranslate2. French/English quality is identical to the base turbo model, so
+we only pay the LoRA cost where it matters — Arabic.
+
+**Requirements:**
+```bash
+pip install transformers peft
+```
+
+**CLI flags:**
+```
+--darija-lora                          enable routing
+--lora-model anaszil/...-darija        adapter path (default)
+--lora-base openai/...-turbo           base model (default)
 ```
 
 ## 7. Limitations / future work
