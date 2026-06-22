@@ -24,8 +24,12 @@ OpenAI's Whisper on the CTranslate2 inference engine. We use it because:
   Silero **VAD** (voice-activity detector), so we don't add an ffmpeg/onnx zoo.
 - **Word/segment timestamps** come for free, which is what an `.srt` needs.
 
-We deliberately use the model **as-is** (no fine-tuning) in this version. See
-*Limitations* for what that costs us on Darija.
+We deliberately use the model **as-is** (no fine-tuning) in the base pipeline. However,
+benchmarking has identified [`anaszil/whisper-large-v3-turbo-darija`](https://huggingface.co/anaszil/whisper-large-v3-turbo-darija)
+(LoRA adapter on `large-v3-turbo`) as the best Darija ASR option — see
+`notebooks/kaggle_compare_darija_models2.ipynb`. The turbo model (`large-v3-turbo` via
+faster-whisper) is also a drop-in replacement that's faster than `large-v3` with
+comparable quality.
 
 ## 2. The Darija reality (important)
 

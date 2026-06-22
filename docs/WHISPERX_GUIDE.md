@@ -876,6 +876,12 @@ an under-resourced dialect. The Arabic model is a reasonable compromise: Darija 
 MSA share the same script and most phonemes, so character-level alignment works
 despite vocabulary differences.
 
+> **Update:** For the ASR stage (not alignment), the [`anaszil/whisper-large-v3-turbo-darija`](https://huggingface.co/anaszil/whisper-large-v3-turbo-darija)
+> LoRA adapter is now the recommended Darija model — benchmarked 3.4× faster and more
+> accurate than large-v3 fine-tunes on real broadcast audio. However, this runs via
+> HuggingFace transformers/PEFT, not through CTranslate2. A future integration could route
+> Darija chunks through this model while keeping faster-whisper for French/MSA.
+
 If alignment fails or degrades quality, it is silently skipped — Whisper's native
 segment timestamps (accurate to ~1 s) are used instead. The pipeline never degrades
 transcription quality because of alignment.
@@ -930,6 +936,11 @@ The model is **speaker-agnostic** (it doesn't identify known people) and
 - Use `transcribe.py` for bulk transcription where you only need text + timestamps
 - Use `transcribe_whisperx.py` when you need speaker labels, word-level timestamps,
   or batched throughput
+
+> **Darija note:** For the best Darija transcription quality, benchmark results recommend
+> [`anaszil/whisper-large-v3-turbo-darija`](https://huggingface.co/anaszil/whisper-large-v3-turbo-darija)
+> (LoRA adapter on `large-v3-turbo`) — see `notebooks/kaggle_compare_darija_models2.ipynb`.
+> The base `large-v3-turbo` is also a viable faster drop-in for `large-v3` in both pipelines.
 
 ---
 

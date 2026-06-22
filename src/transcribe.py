@@ -254,7 +254,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--out-dir", default="out",
                     help="Where to write .srt files (default: out/).")
     ap.add_argument("--model", default="large-v3",
-                    help="faster-whisper model size or path (default: large-v3).")
+                    help="faster-whisper model size or path (default: large-v3). "
+                         "For Darija, 'large-v3-turbo' is faster with comparable quality; "
+                         "see notebooks/ for the anaszil LoRA adapter benchmark.")
     ap.add_argument("--device", default="auto", choices=["auto", "cuda", "cpu"])
     ap.add_argument("--compute-type", default=None,
                     help="Override compute type (e.g. float16, int8, int8_float16).")

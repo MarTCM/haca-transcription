@@ -4,9 +4,13 @@ Open-source transcription pipeline that automatically generates `.srt` subtitles
 broadcasts in **Moroccan Darija, Modern Standard Arabic, and French** — including files
 that **code-switch** between them.
 
-Built on [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (Whisper `large-v3`)
-with **per-chunk language detection**, so a single mixed broadcast transcribes natively
-instead of being forced into one language.
+Built on [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (Whisper `large-v3`,
+or `large-v3-turbo` for faster inference) with **per-chunk language detection**, so a
+single mixed broadcast transcribes natively instead of being forced into one language.
+
+> **Best Darija model:** Benchmarking confirms [`anaszil/whisper-large-v3-turbo-darija`](https://huggingface.co/anaszil/whisper-large-v3-turbo-darija)
+> (LoRA adapter on turbo) is 3.4× faster and more accurate than full large-v3 fine-tunes
+> on real broadcast audio. See `notebooks/kaggle_compare_darija_models2.ipynb`.
 
 > This is a standalone tool. It produces standard `.srt`, which means its output can feed
 > any subtitle consumer — including the separate HACA sentiment/tonality benchmark — but
@@ -77,6 +81,7 @@ tests/                 SRT-writer unit tests
 
 ## License & limitations
 
-Uses Whisper `large-v3` as-is — Darija word-error-rate is the weakest spot (no
-Darija-specific model yet), there is no speaker diarization, and Whisper's native cue
-boundaries are kept. See [`docs/TRANSCRIPTION.md`](docs/TRANSCRIPTION.md) §7.
+Whisper on Darija is the weakest spot, though the `anaszil/whisper-large-v3-turbo-darija`
+LoRA adapter (see notebook comparison) significantly improves it. There is no speaker
+diarization in the basic pipeline (use `transcribe_whisperx.py --diarize` for that), and
+Whisper's native cue boundaries are kept. See [`docs/TRANSCRIPTION.md`](docs/TRANSCRIPTION.md) §7.
