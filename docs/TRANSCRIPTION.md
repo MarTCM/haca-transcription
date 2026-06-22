@@ -1,5 +1,9 @@
 # Transcription pipeline — design notes
 
+> **If you're new here, start with [`PIPELINE.md`](PIPELINE.md)** — it covers the
+> entire architecture, code walkthrough, real output examples, and FAQ. This file is
+> supplemental design rationale.
+
 This project turns a broadcast **audio or video file** into a standard **`.srt`**
 subtitle file, for content in **Moroccan Darija, Modern Standard Arabic, and French**
 (including files that code-switch between them).
@@ -148,10 +152,13 @@ pip install transformers peft
 
 ## 7. Limitations / future work
 
-- **Darija WER** is the weakest point (no Darija-specific model). Could be improved later
-  by swapping in a fine-tuned Whisper/wav2vec2 Darija checkpoint behind the same CLI.
-- **No speaker diarization.** Cues are not labelled by speaker. Adding it means moving to
-  WhisperX + pyannote (and an HF token).
+- **Darija WER** is the weakest point (no dedicated Darija model). The anaszil LoRA adapter
+  (`--darija-lora`) significantly improves it — see [`PIPELINE.md`](PIPELINE.md) §LoRA.
+- **Speaker diarization** exists in the WhisperX pipeline (`--diarize`) but requires a
+  HuggingFace read token and acceptance of pyannote model terms. Without these,
+  diarization is silently skipped.
+- **Plain vs diarized SRTs are identical** when `HF_TOKEN` is empty (see the real output
+  examples in [`PIPELINE.md`](PIPELINE.md)).
 - **No subtitle re-segmentation.** We keep Whisper's native segment boundaries; we do not
   re-flow long cues to a strict characters-per-line limit (that needs word timestamps to
   keep timing honest). Fine for downstream NLP; a human subtitler may want tighter cues.

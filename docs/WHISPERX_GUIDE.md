@@ -1,5 +1,9 @@
 # WhisperX Pipeline — Complete Guide
 
+> **New here? Start with [`PIPELINE.md`](PIPELINE.md)** for the full architecture,
+> design rationale, code walkthrough, real output examples, and FAQ. This file is a
+> deep-dive supplement covering the WhisperX-specific code.
+
 ## Overview
 
 `transcribe_whisperx.py` is an alternate transcription pipeline that replaces the

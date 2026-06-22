@@ -14,8 +14,8 @@ single mixed broadcast transcribes natively instead of being forced into one lan
 
 > This is a standalone tool. It produces standard `.srt`, which means its output can feed
 > any subtitle consumer — including the separate HACA sentiment/tonality benchmark — but
-> the two projects share no code. See [`docs/TRANSCRIPTION.md`](docs/TRANSCRIPTION.md) for
-> the full design.
+> the two projects share no code. See [`docs/PIPELINE.md`](docs/PIPELINE.md) for the full
+> architecture, code walkthrough, and real output examples.
 
 ## Install
 
@@ -72,11 +72,14 @@ pytest tests/        # SRT-writer format / round-trip tests (no model or audio n
 ## Layout
 
 ```
-src/transcribe.py      pipeline + CLI (decode → VAD → chunk → detect → transcribe → write)
-src/srt_writer.py      standard .srt writer
-docs/TRANSCRIPTION.md  design notes (why faster-whisper, the Darija reality, limits)
-notebooks/             Kaggle GPU runner
-tests/                 SRT-writer unit tests
+src/transcribe.py              pipeline + CLI (decode → VAD → chunk → detect → transcribe → write)
+src/transcribe_whisperx.py     alternate pipeline (WhisperX + alignment + diarization)
+src/srt_writer.py              standard .srt writer
+docs/PIPELINE.md               comprehensive reference (start here)
+docs/TRANSCRIPTION.md          design notes (why faster-whisper, the Darija reality)
+docs/WHISPERX_GUIDE.md         WhisperX code walkthrough (deep-dive supplement)
+notebooks/                     Kaggle GPU runners
+tests/                         SRT-writer unit tests
 ```
 
 ## License & limitations
