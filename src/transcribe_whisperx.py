@@ -431,7 +431,7 @@ def transcribe_file(
                 from whisperx.diarize import DiarizationPipeline
 
                 diarize_model = DiarizationPipeline(
-                    hf_token=hf_token, device=device
+                    device=device
                 )
                 diar_kw = {}
                 if min_speakers is not None:
