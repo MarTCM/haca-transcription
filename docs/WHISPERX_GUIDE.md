@@ -1037,6 +1037,17 @@ OSError: Unable to load model. Check your HF token and model access.
 ```
 → Diarization adds ~500 MB VRAM. Reduce `--batch-size` or use `--compute-type int8`.
 
+### LoRA + diarization yields no speaker labels
+
+If `--darija-lora` is enabled and `--diarize` + a valid `--hf-token` are both
+set but speaker labels are still absent, the LoRA adapter may be producing
+segments without a `words` field. The `assign_word_speakers()` function needs
+word-level timestamps to match diarization output to transcribed text.
+
+**Fix:** Update the repo to commit `856a131` or later, which adds
+`_words_from_segment()` — a helper that creates approximate word timestamps
+for LoRA segments before they enter the alignment pipeline.
+
 ### Arabic alignment fails
 ```
 [align] Arabic fallback failed: ...

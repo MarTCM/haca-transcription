@@ -375,6 +375,17 @@ The LoRA runs in **PyTorch** (HF pipeline), which is slower per token than
 is identical between the two. The hybrid approach — Arabic chunks via LoRA,
 everything else via CTranslate2 — gives the best of both worlds.
 
+### LoRA + speaker labels (the `words` field)
+
+LoRA segments need word-level timestamps for WhisperX's alignment + diarization
+pipeline to assign speakers. The helper `_words_from_segment()` creates
+approximate word timestamps by splitting the segment duration evenly across
+words. These are refined by the wav2vec2 aligner and used by `assign_word_speakers`
+to match speaker segments.
+
+Without this field, Arabic chunks routed through the LoRA would not get
+`[SPEAKER_XX]` labels even when diarization is enabled with a valid token.
+
 ### Requirements
 
 ```bash

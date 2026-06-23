@@ -249,6 +249,25 @@ def _load_darija_lora(
     return pipe
 
 
+def _words_from_segment(text: str, start: float, end: float) -> List[Dict]:
+    """Build approximate word timestamps by even splits.
+
+    Used by ``_transcribe_with_lora`` so that LoRA segments carry a ``words``
+    field, making them compatible with WhisperX alignment + speaker
+    diarization downstream.
+    """
+    words = text.strip().split()
+    if not words:
+        return []
+    duration = end - start
+    per_word = duration / len(words)
+    return [
+        {"start": start + i * per_word, "end": start + (i + 1) * per_word,
+         "word": w, "score": 0.0}
+        for i, w in enumerate(words)
+    ]
+
+
 def _transcribe_with_lora(
     chunk_audio, pipe, offset: float, lang: str,
 ) -> List[Dict]:
@@ -268,18 +287,24 @@ def _transcribe_with_lora(
             start, end = ts
             if start is None or end is None:
                 continue
+            abs_start = offset + start
+            abs_end = offset + end
             segments.append({
-                "start": offset + start,
-                "end": offset + end,
+                "start": abs_start,
+                "end": abs_end,
                 "text": t,
                 "lang": lang,
+                "words": _words_from_segment(t, abs_start, abs_end),
             })
         return segments
+    abs_start = offset
+    abs_end = offset + 0.1
     return [{
-        "start": offset,
-        "end": offset + 0.1,
+        "start": abs_start,
+        "end": abs_end,
         "text": text,
         "lang": lang,
+        "words": _words_from_segment(text, abs_start, abs_end),
     }]
 
 
