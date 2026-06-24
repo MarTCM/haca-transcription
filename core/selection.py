@@ -7,9 +7,10 @@ The medias hierarchy is::
 
 This module turns coarse filters (channels, years, months, days, hours — any of
 which may be omitted to mean "all") into a concrete, sorted list of relative
-``.mp3`` paths. The same function backs both the CLI's filter flags and the
-FastAPI backend's selection expansion, so the UI and CLI always agree on which
-files a given selection matches.
+media paths (any extension in :data:`MEDIA_EXTS` — ``.mp3``, ``.mp4``, ...). The
+same function backs both the CLI's filter flags and the FastAPI backend's
+selection expansion, so the UI and CLI always agree on which files a given
+selection matches.
 
 Nothing here imports the heavy transcription stack, so it is cheap to call for a
 dry-run listing.
@@ -21,9 +22,18 @@ import re
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set, Union
 
-# A medias filename is YYYYMMDDHHMM + media extension; we only batch .mp3.
-MEDIA_GLOB = "*.mp3"
-_FILENAME_RE = re.compile(r"^(?P<stamp>\d{12})\.mp3$", re.IGNORECASE)
+# Media extensions we batch. Mirrors MEDIA_EXTS in src/transcribe.py and
+# src/transcribe_whisperx.py (audio + video; faster-whisper's PyAV / WhisperX's
+# ffmpeg extract the audio track from video). Kept as a local copy so this module
+# stays free of any heavy imports.
+MEDIA_EXTS = {
+    ".mp3", ".wav", ".m4a", ".flac", ".ogg", ".opus", ".aac", ".wma",
+    ".mp4", ".mkv", ".mka", ".mov", ".webm", ".avi", ".ts", ".m4v",
+}
+
+# A medias filename is YYYYMMDDHHMM + any media extension, e.g. 202406010900.mp3
+# or 202406010900.mp4.
+_FILENAME_RE = re.compile(r"^(?P<stamp>\d{12})\.[A-Za-z0-9]+$")
 
 # Nested index type: channel -> year -> month -> day -> [filenames]
 MediaIndex = Dict[str, Dict[int, Dict[int, Dict[int, List[str]]]]]
@@ -106,7 +116,8 @@ def _int_or_none(name: str) -> Optional[int]:
 def scan_medias(root: Union[str, Path]) -> MediaIndex:
     """Walk ``root`` into a nested ``channel -> year -> month -> day -> [files]`` index.
 
-    Non-numeric year/month/day directories and non-``.mp3`` files are ignored.
+    Non-numeric year/month/day directories and non-media files (extensions
+    outside :data:`MEDIA_EXTS`) are ignored.
     A missing ``root`` yields an empty index (graceful, never raises).
     """
     root = Path(root)
@@ -132,7 +143,8 @@ def scan_medias(root: Union[str, Path]) -> MediaIndex:
                     if day is None:
                         continue
                     files = sorted(
-                        f.name for f in day_dir.glob(MEDIA_GLOB) if f.is_file()
+                        f.name for f in day_dir.iterdir()
+                        if f.is_file() and f.suffix.lower() in MEDIA_EXTS
                     )
                     if files:
                         days[day] = files
@@ -146,9 +158,10 @@ def scan_medias(root: Union[str, Path]) -> MediaIndex:
 
 
 def hour_of(filename: str) -> Optional[int]:
-    """Extract the broadcast hour (0-23) from a ``YYYYMMDDHHMM.mp3`` filename.
+    """Extract the broadcast hour (0-23) from a ``YYYYMMDDHHMM.<ext>`` filename.
 
-    Returns ``None`` if the filename doesn't match the expected stamp pattern.
+    Works for any media extension (``.mp3``, ``.mp4``, ...). Returns ``None`` if
+    the filename doesn't match the 12-digit stamp pattern.
     """
     m = _FILENAME_RE.match(filename)
     if not m:
@@ -170,7 +183,10 @@ def expand_selections(
     *,
     index: Optional[MediaIndex] = None,
 ) -> List[str]:
-    """Expand coarse filters into a sorted list of relative ``.mp3`` paths.
+    """Expand coarse filters into a sorted list of relative media paths.
+
+    Includes any file whose extension is in :data:`MEDIA_EXTS` (``.mp3``,
+    ``.mp4``, ...).
 
     Any filter passed as ``None`` (or an empty set) means "all" for that level.
     Paths are returned relative to ``root`` using forward slashes, e.g.

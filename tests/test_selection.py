@@ -152,3 +152,51 @@ def test_expand_combined(medias):
 
 def test_expand_no_match(medias):
     assert expand_selections(medias, channels=["does-not-exist"]) == []
+
+
+# --------------------------------------------------------------------------- #
+# Video / mixed media extensions
+# --------------------------------------------------------------------------- #
+def test_hour_of_video_extensions():
+    assert hour_of("202406010900.mp4") == 9
+    assert hour_of("202406011830.mkv") == 18
+    assert hour_of("202406010900.MP4") == 9  # case-insensitive extension
+
+
+@pytest.fixture
+def mixed_media(tmp_path):
+    """A day folder mixing audio, video, and a non-media file."""
+    d = tmp_path / "tv/2024/06/01"
+    d.mkdir(parents=True)
+    for name in ["202406010900.mp3", "202406011000.mp4", "202406011100.mkv",
+                 "202406011200.ts", "notes.txt", "202406011300.json"]:
+        (d / name).write_bytes(b"\x00")
+    return tmp_path
+
+
+def test_scan_includes_video_excludes_non_media(mixed_media):
+    idx = scan_medias(mixed_media)
+    files = idx["tv"][2024][6][1]
+    assert files == [
+        "202406010900.mp3",
+        "202406011000.mp4",
+        "202406011100.mkv",
+        "202406011200.ts",
+    ]
+    assert "notes.txt" not in files
+    assert "202406011300.json" not in files  # .json is not a media ext
+
+
+def test_expand_picks_up_video(mixed_media):
+    files = expand_selections(mixed_media)
+    assert "tv/2024/06/01/202406011000.mp4" in files
+    assert "tv/2024/06/01/202406011100.mkv" in files
+
+
+def test_expand_hour_filter_across_extensions(mixed_media):
+    # 10:00 (mp4) and 11:00 (mkv) only
+    files = expand_selections(mixed_media, hours={10, 11})
+    assert files == [
+        "tv/2024/06/01/202406011000.mp4",
+        "tv/2024/06/01/202406011100.mkv",
+    ]

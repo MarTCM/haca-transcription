@@ -12,7 +12,8 @@ you need to understand and extend the codebase.
 
 ## 1. What it is
 
-A command-line tool that batch-transcribes `.mp3` broadcasts from a `medias/`
+A command-line tool that batch-transcribes broadcasts (audio or video — see
+`MEDIA_EXTS`) from a `medias/`
 directory tree into `.srt` subtitle files. You point it at the tree, filter the
 subset you want (by channel / year / month / day / hour, individually or "all"),
 and it transcribes each matching file — routing Moroccan Darija through a
@@ -201,11 +202,19 @@ for dry-runs.
 - `scan_medias(root) -> MediaIndex`
   Walks the tree into a nested dict
   `channel -> year(int) -> month(int) -> day(int) -> [filenames]`.
-  Non-numeric year/month/day directories and non-`.mp3` files are skipped. A
-  missing `root` returns `{}` (never raises). Everything is sorted.
+  Non-numeric year/month/day directories and non-media files (extensions outside
+  `MEDIA_EXTS`) are skipped. A missing `root` returns `{}` (never raises).
+  Everything is sorted.
 - `hour_of(filename) -> int | None`
-  Extracts the hour (0–23) from a `YYYYMMDDHHMM.mp3` filename via regex
-  (`stamp[8:10]`). Returns `None` for filenames that don't match the stamp pattern.
+  Extracts the hour (0–23) from a `YYYYMMDDHHMM.<ext>` filename via regex
+  (`stamp[8:10]`) — any media extension. Returns `None` for filenames that don't
+  match the 12-digit stamp pattern.
+
+`MEDIA_EXTS` mirrors the set in `src/transcribe.py` / `src/transcribe_whisperx.py`
+(audio + video: `.mp3 .wav .m4a .flac .ogg .opus .aac .wma .mp4 .mkv .mka .mov
+.webm .avi .ts .m4v`). Both pipelines extract the audio track from video, so the
+CLI batches video too (WhisperX's decode path needs `ffmpeg` on PATH; faster-whisper
+bundles PyAV).
 
 **Expansion**
 
@@ -454,7 +463,9 @@ and `runner.run_file`.
 - **`audio_seconds` is an approximation** (max segment end), not the precise source
   duration — it avoids a second decode pass.
 - **Hours come from the filename**, not file metadata. A file whose name doesn't
-  match `YYYYMMDDHHMM.mp3` is excluded by any hour filter (and has `hour_of → None`).
+  match `YYYYMMDDHHMM.<ext>` is excluded by any hour filter (and has `hour_of → None`).
+- **Audio and video are supported** (any extension in `MEDIA_EXTS`); the WhisperX
+  decode path additionally needs `ffmpeg` on PATH.
 - **Filters are "all" when omitted.** Passing nothing transcribes the entire tree —
   use `--dry-run` first to confirm the match count.
 - **Stateless.** The CLI writes no database; the web UI's job DB is separate. The
