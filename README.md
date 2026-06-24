@@ -23,6 +23,8 @@ single mixed broadcast transcribes natively instead of being forced into one lan
 pip install -r requirements.txt
 # For GPU (recommended), also install a CUDA build of torch matching your driver, e.g.:
 # pip install torch --index-url https://download.pytorch.org/whl/cu121
+# For speaker annotation (WhisperX + diarization):
+# pip install -r requirements_whisperx.txt
 ```
 
 faster-whisper bundles media decoding (PyAV, handles video) and the Silero VAD, so no
@@ -57,6 +59,51 @@ python src/transcribe.py --input journal.mp3 --lang ar --out-dir out/
 | `--max-chunk-s` | `25`        | Max chunk length (seconds); chunks break only at silence.      |
 | `--overwrite`   | off         | Re-transcribe even if the `.srt` already exists.               |
 
+## Batch CLI (medias tree)
+
+`src/transcribe.py` handles a single file or a flat directory. For transcribing a
+structured archive, `cli.py` batches over a `medias/` tree and writes a mirrored
+`out/srt/` tree, with channel/date/hour filtering and a structured run log. It
+shares all transcription logic with the FastAPI backend (the Transcription UI) via
+the `core/` package, so the two stay in lock-step.
+
+```
+medias/{channel}/{year}/{month}/{day}/{YYYYMMDDHHMM}.mp3   # input
+out/srt/{channel}/{year}/{month}/{day}/{YYYYMMDDHHMM}.srt  # output (mirrors input)
+```
+
+```bash
+# Dry-run: list the matched files, run no models.
+python cli.py --channel al-oula --year 2024 --month 6 --hours 9-18 --dry-run
+
+# Transcribe two channels, all of June 2024, with the recommended defaults
+# (Darija-LoRA on: Arabic chunks → LoRA, French/English → base model).
+python cli.py --channel al-oula,2m --year 2024 --month 6
+
+# Speaker annotation (WhisperX diarization); needs a Hugging Face token.
+python cli.py --channel 2m --year 2024 --month 6 --day 1 \
+    --speaker-annotation --hf-token hf_xxx
+```
+
+Filters (`--channel`, `--year`, `--month`, `--day`, `--hours`) accept lists and/or
+ranges (`9-18,21`); omit any to mean "all". `--speaker-annotation` is off by
+default. See [`docs/CLI_ARCHITECTURE.md`](docs/CLI_ARCHITECTURE.md) for the full
+flag reference, the shared `core/` architecture, and every design decision.
+
+### Docker (GPU)
+
+A GPU image is provided (`Dockerfile.gpu` + `docker-compose.yml`):
+
+```bash
+export MEDIAS_DIR=/data/medias
+docker compose build
+docker compose run --rm transcribe --channel al-oula --year 2024 --month 6
+```
+
+Building needs no GPU (only runtime does). See the "Running with Docker (GPU)"
+section of [`docs/CLI_ARCHITECTURE.md`](docs/CLI_ARCHITECTURE.md) for building,
+pushing to Docker Hub, and running on a remote GPU box.
+
 ## Recommended workflow
 
 The heaviest, highest-quality runs are meant for a **Kaggle/Colab GPU (T4)** — see
@@ -66,20 +113,28 @@ smoke-testing the plumbing, not for quality.
 ## Tests
 
 ```bash
-pytest tests/        # SRT-writer format / round-trip tests (no model or audio needed)
+pytest tests/        # SRT-writer + core (config/selection/runner) + CLI tests
 ```
+
+The `core/` and `cli.py` tests run without a GPU, a model download, or
+faster-whisper installed — they use injected fakes for the transcription call.
 
 ## Layout
 
 ```
+cli.py                         batch CLI over a medias/ tree (filters → mirrored out/srt/)
+core/                          shared logic (config, selection, runner, summary) — CLI + UI
 src/transcribe.py              pipeline + CLI (decode → VAD → chunk → detect → transcribe → write)
 src/transcribe_whisperx.py     alternate pipeline (WhisperX + alignment + diarization)
 src/srt_writer.py              standard .srt writer
+Dockerfile.gpu                 GPU image for the batch CLI
+docker-compose.yml             convenience wrapper for repeated GPU runs
+docs/CLI_ARCHITECTURE.md       batch CLI architecture, code walkthrough, Docker guide
 docs/PIPELINE.md               comprehensive reference (start here)
 docs/TRANSCRIPTION.md          design notes (why faster-whisper, the Darija reality)
 docs/WHISPERX_GUIDE.md         WhisperX code walkthrough (deep-dive supplement)
 notebooks/                     Kaggle GPU runners
-tests/                         SRT-writer unit tests
+tests/                         SRT-writer + core + CLI unit tests
 ```
 
 ## License & limitations
