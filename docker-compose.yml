@@ -1,0 +1,59 @@
+# Convenience wrapper for repeated GPU runs of the transcription CLI.
+#
+# Local machine (build the image):
+#   export MEDIAS_DIR=/data/medias              # host path to your medias tree
+#   docker compose build
+#   docker compose run --rm transcribe --channel al-oula --year 2024 --month 6
+#   docker compose run --rm transcribe --dry-run            # any CLI flag works
+#
+# GPU box (use an image pulled from Docker Hub — no build needed):
+#   export IMAGE=<DOCKERHUB_USER>/haca-transcribe:gpu
+#   export MEDIAS_DIR=/data/medias
+#   export HF_TOKEN=hf_xxx                       # only for --speaker-annotation
+#   docker compose pull
+#   docker compose run --rm transcribe --channel al-oula --year 2024 --month 6
+#
+# The IMAGE env var selects which image to run (defaults to the locally-built
+# tag). `build:` is only consulted by `docker compose build` / when the image is
+# absent, so it's harmless on the GPU box where you pull instead.
+#
+# Everything after the service name is passed straight to `python3 cli.py`
+# (the image ENTRYPOINT), so the CLI flags are identical to a native run.
+# Note: args you pass REPLACE the service `command`; that's why we avoid baking
+# defaults there and instead mount medias at the CLI's default path (/app/medias)
+# and rely on --device auto to find the GPU.
+
+services:
+  transcribe:
+    # Select the image to run: locally-built tag by default, or set IMAGE to a
+    # Docker Hub tag (e.g. youruser/haca-transcribe:gpu) on the GPU box.
+    image: ${IMAGE:-haca-transcribe:gpu}
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu
+    # Pass the HF token through for diarization (empty if unset — fine unless
+    # you use --speaker-annotation).
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      # Input medias tree (read-only), mounted at the CLI's default --medias path
+      # so no flag is needed. Default to ./medias if MEDIAS_DIR is unset.
+      - ${MEDIAS_DIR:-./medias}:/app/medias:ro
+      # Output SRTs + run logs (written back to the host).
+      - ./out:/app/out
+      # Persistent model cache so multi-GB models download only once.
+      - haca-model-cache:/cache/huggingface
+    # No `command:` default — `--device auto` detects the GPU, and medias is at
+    # the default path. Pass only the filters you want:
+    #   docker compose run --rm transcribe --channel al-oula --year 2024 --month 6
+    # GPU access (Compose v2 + NVIDIA Container Toolkit on the host).
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  haca-model-cache:
