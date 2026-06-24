@@ -149,7 +149,7 @@ def _write_srt(segments: List[Dict], out_path: Path) -> None:
 def srt_output_path(rel_path: str, out_dir: Union[str, Path]) -> Path:
     """Map a relative media path to its mirrored ``.srt`` path under ``out_dir``.
 
-    ``"al-oula/2024/06/01/202406010900.mp3"`` -> ``out_dir/al-oula/2024/06/01/202406010900.srt``
+    ``"al-oula/2024/06/01/20240601090000.mp3"`` -> ``out_dir/al-oula/2024/06/01/20240601090000.srt``
     """
     rel = Path(rel_path)
     return Path(out_dir) / rel.with_suffix(".srt")

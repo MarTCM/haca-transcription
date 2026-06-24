@@ -26,9 +26,9 @@ console summary.
 ### Media & output layout
 
 ```
-medias/{channel}/{year}/{month}/{day}/{YYYYMMDDHHMM}.mp3   # input
-out/srt/{channel}/{year}/{month}/{day}/{YYYYMMDDHHMM}.srt  # output (mirrors input)
-out/logs/cli-<timestamp>.log                               # run log
+medias/{channel}/{year}/{month}/{day}/{YYYYMMDDHHMMSS}.mp3   # input
+out/srt/{channel}/{year}/{month}/{day}/{YYYYMMDDHHMMSS}.srt  # output (mirrors input)
+out/logs/cli-<timestamp>.log                                 # run log
 ```
 
 The output mirrors the input arborescence 1:1; the filename stem is identical,
@@ -206,9 +206,10 @@ for dry-runs.
   `MEDIA_EXTS`) are skipped. A missing `root` returns `{}` (never raises).
   Everything is sorted.
 - `hour_of(filename) -> int | None`
-  Extracts the hour (0–23) from a `YYYYMMDDHHMM.<ext>` filename via regex
-  (`stamp[8:10]`) — any media extension. Returns `None` for filenames that don't
-  match the 12-digit stamp pattern.
+  Extracts the hour (0–23) from a `YYYYMMDDHHMMSS.<ext>` filename via regex
+  (`stamp[8:10]`) — any media extension. Also accepts the legacy 12-digit
+  `YYYYMMDDHHMM` form. Returns `None` for filenames that don't match the stamp
+  pattern.
 
 `MEDIA_EXTS` mirrors the set in `src/transcribe.py` / `src/transcribe_whisperx.py`
 (audio + video: `.mp3 .wav .m4a .flac .ogg .opus .aac .wma .mp4 .mkv .mka .mov
@@ -221,7 +222,7 @@ bundles PyAV).
 - `expand_selections(root, channels=None, years=None, months=None, days=None, hours=None, *, index=None) -> list[str]`
   The heart of the module. Any filter left `None`/empty means "all" at that level.
   Returns a **sorted** list of paths **relative to `root`**, using forward slashes:
-  `"al-oula/2024/06/01/202406010900.mp3"`. Pass a pre-built `index` (from
+  `"al-oula/2024/06/01/20240601090000.mp3"`. Pass a pre-built `index` (from
   `scan_medias`) to avoid re-walking the disk. Hour filtering reads the hour from
   each filename via `hour_of`.
 
@@ -263,8 +264,8 @@ Both are isolated precisely so tests can replace them.
 **Output mirroring**
 
 - `srt_output_path(rel_path, out_dir) -> Path` — maps
-  `"al-oula/2024/06/01/202406010900.mp3"` to
-  `out_dir/al-oula/2024/06/01/202406010900.srt` (swap suffix, preserve subdirs).
+  `"al-oula/2024/06/01/20240601090000.mp3"` to
+  `out_dir/al-oula/2024/06/01/20240601090000.srt` (swap suffix, preserve subdirs).
 - `_audio_span(segments)` — approximate transcribed length = max segment `end`.
 
 **The per-file entry point**
@@ -310,9 +311,9 @@ Example log:
 
 ```
 [JOB START]  2026-06-24T11:40:01 | 3 files | pipeline=faster-whisper | model=large-v3 | darija_lora=true | language=auto | speaker_annotation=false
-[OK]         2026-06-24T11:40:46 | al-oula/2024/06/01/202406010900.mp3 | 44.8s
-[FAIL]       2026-06-24T11:41:02 | al-oula/2024/06/01/202406011000.mp3 | RuntimeError: CUDA out of memory
-[SKIP]       2026-06-24T11:41:02 | al-oula/2024/06/01/202406012300.mp3 | exists (use --overwrite)
+[OK]         2026-06-24T11:40:46 | al-oula/2024/06/01/20240601090000.mp3 | 44.8s
+[FAIL]       2026-06-24T11:41:02 | al-oula/2024/06/01/20240601100000.mp3 | RuntimeError: CUDA out of memory
+[SKIP]       2026-06-24T11:41:02 | al-oula/2024/06/01/20240601230000.mp3 | exists (use --overwrite)
 [JOB END]    2026-06-24T11:41:30 | failed | 2/3 | 1 ok, 1 failed
 ```
 

@@ -7,8 +7,8 @@ subset of `.mp3` broadcasts to mirrored `.srt` output. It shares all transcripti
 and selection logic with the FastAPI backend (the Transcription UI) via a common
 `core/` package, so the two front-ends never drift.
 
-Media hierarchy: `medias/{channel}/{year}/{month}/{day}/{YYYYMMDDHHMM}.mp3`
-Output mirror:   `out/srt/{channel}/{year}/{month}/{day}/{YYYYMMDDHHMM}.srt`
+Media hierarchy: `medias/{channel}/{year}/{month}/{day}/{YYYYMMDDHHMMSS}.mp3`
+Output mirror:   `out/srt/{channel}/{year}/{month}/{day}/{YYYYMMDDHHMMSS}.srt`
 
 ## 2. Requirements (gathered)
 
@@ -56,7 +56,7 @@ python cli.py [--medias DIR]
   --year    2024-2025          list and/or range
   --month   1-6                list and/or range (1-12)
   --day     1-15               list and/or range (1-31)
-  --hours   9-18,21            list and/or range (0-23); matched against HHMM in filename
+  --hours   9-18,21            list and/or range (0-23); matched against the HH in filename
 
   # headline option:
   --speaker-annotation         default OFF; implies --pipeline whisperx; requires --hf-token / $HF_TOKEN
@@ -81,7 +81,7 @@ python cli.py [--medias DIR]
 
 - Range/list parser applies to `--year/--month/--day/--hours`:
   `"9-18,21"` -> `{9,10,...,18,21}`, `"1,3,5"` -> `{1,3,5}`, omitted -> all.
-- Hour is parsed from the `HHMM` portion of the filename (`YYYYMMDDHHMM.mp3`).
+- Hour is parsed from the `HH` portion of the filename (`YYYYMMDDHHMMSS.mp3`).
 - `--channel` is a comma-list and/or repeated flag; omitted -> all channels.
 
 ### Mixed-language routing

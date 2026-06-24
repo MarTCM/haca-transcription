@@ -68,8 +68,8 @@ shares all transcription logic with the FastAPI backend (the Transcription UI) v
 the `core/` package, so the two stay in lock-step.
 
 ```
-medias/{channel}/{year}/{month}/{day}/{YYYYMMDDHHMM}.mp3   # input
-out/srt/{channel}/{year}/{month}/{day}/{YYYYMMDDHHMM}.srt  # output (mirrors input)
+medias/{channel}/{year}/{month}/{day}/{YYYYMMDDHHMMSS}.mp3   # input
+out/srt/{channel}/{year}/{month}/{day}/{YYYYMMDDHHMMSS}.srt  # output (mirrors input)
 ```
 
 ```bash

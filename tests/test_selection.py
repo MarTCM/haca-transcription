@@ -61,9 +61,14 @@ def test_parse_channels_variants():
 
 
 def test_hour_of():
-    assert hour_of("202406010900.mp3") == 9
+    # 14-digit YYYYMMDDHHMMSS (current export) and 12-digit YYYYMMDDHHMM (legacy)
+    # are both accepted; the hour lives at positions 8-9 in either case.
+    assert hour_of("20260613180000.mp3") == 18  # YYYYMMDDHHMMSS
+    assert hour_of("20240601090000.mp3") == 9
+    assert hour_of("202406010900.mp3") == 9     # YYYYMMDDHHMM (legacy)
     assert hour_of("202406012300.mp3") == 23
     assert hour_of("not-a-stamp.mp3") is None
+    assert hour_of("2024060109000.mp3") is None  # 13 digits: invalid
 
 
 # --------------------------------------------------------------------------- #
@@ -79,10 +84,10 @@ def medias(tmp_path):
     2m/2025/01/15/{1200}
     """
     layout = {
-        "al-oula/2024/06/01": ["202406010900", "202406011000", "202406012300"],
-        "al-oula/2024/07/01": ["202407010900"],
-        "2m/2024/06/02": ["202406020900", "202406021800"],
-        "2m/2025/01/15": ["202501151200"],
+        "al-oula/2024/06/01": ["20240601090000", "20240601100000", "20240601230000"],
+        "al-oula/2024/07/01": ["20240701090000"],
+        "2m/2024/06/02": ["20240602090000", "20240602180000"],
+        "2m/2025/01/15": ["20250115120000"],
     }
     for rel, stamps in layout.items():
         d = tmp_path / rel
@@ -105,7 +110,7 @@ def test_scan_structure(medias):
     assert set(idx["al-oula"]) == {2024}
     assert set(idx["al-oula"][2024]) == {6, 7}
     assert idx["al-oula"][2024][6][1] == [
-        "202406010900.mp3", "202406011000.mp3", "202406012300.mp3"
+        "20240601090000.mp3", "20240601100000.mp3", "20240601230000.mp3"
     ]
     # stray .txt is ignored
     assert all(f.endswith(".mp3") for f in idx["al-oula"][2024][6][1])
@@ -115,7 +120,7 @@ def test_expand_all(medias):
     files = expand_selections(medias)
     assert len(files) == 7
     assert files == sorted(files)
-    assert "al-oula/2024/06/01/202406010900.mp3" in files
+    assert "al-oula/2024/06/01/20240601090000.mp3" in files
 
 
 def test_expand_channel_filter(medias):
@@ -135,8 +140,8 @@ def test_expand_hours_range(medias):
     files = expand_selections(medias, hours={9, 10, 11, 12})
     hours = {hour_of(Path(f).name) for f in files}
     assert hours <= {9, 10, 11, 12}
-    assert "al-oula/2024/06/01/202406012300.mp3" not in files
-    assert "2m/2024/06/02/202406021800.mp3" not in files
+    assert "al-oula/2024/06/01/20240601230000.mp3" not in files
+    assert "2m/2024/06/02/20240602180000.mp3" not in files
 
 
 def test_expand_combined(medias):
@@ -145,8 +150,8 @@ def test_expand_combined(medias):
         days={1}, hours={9, 10},
     )
     assert files == [
-        "al-oula/2024/06/01/202406010900.mp3",
-        "al-oula/2024/06/01/202406011000.mp3",
+        "al-oula/2024/06/01/20240601090000.mp3",
+        "al-oula/2024/06/01/20240601100000.mp3",
     ]
 
 
@@ -154,13 +159,23 @@ def test_expand_no_match(medias):
     assert expand_selections(medias, channels=["does-not-exist"]) == []
 
 
+def test_expand_hours_with_14digit_stamps(tmp_path):
+    # 14-digit YYYYMMDDHHMMSS names must be selectable by the hours filter.
+    d = tmp_path / "al-oula/2024/06/13"
+    d.mkdir(parents=True)
+    for name in ["20240613090000.mp3", "20240613180000.mp3", "20240613230000.mp3"]:
+        (d / name).write_bytes(b"\x00")
+    files = expand_selections(tmp_path, hours={18})
+    assert files == ["al-oula/2024/06/13/20240613180000.mp3"]
+
+
 # --------------------------------------------------------------------------- #
 # Video / mixed media extensions
 # --------------------------------------------------------------------------- #
 def test_hour_of_video_extensions():
-    assert hour_of("202406010900.mp4") == 9
-    assert hour_of("202406011830.mkv") == 18
-    assert hour_of("202406010900.MP4") == 9  # case-insensitive extension
+    assert hour_of("20240601090000.mp4") == 9
+    assert hour_of("20240601183000.mkv") == 18
+    assert hour_of("20240601090000.MP4") == 9  # case-insensitive extension
 
 
 @pytest.fixture
@@ -168,8 +183,8 @@ def mixed_media(tmp_path):
     """A day folder mixing audio, video, and a non-media file."""
     d = tmp_path / "tv/2024/06/01"
     d.mkdir(parents=True)
-    for name in ["202406010900.mp3", "202406011000.mp4", "202406011100.mkv",
-                 "202406011200.ts", "notes.txt", "202406011300.json"]:
+    for name in ["20240601090000.mp3", "20240601100000.mp4", "20240601110000.mkv",
+                 "20240601120000.ts", "notes.txt", "20240601130000.json"]:
         (d / name).write_bytes(b"\x00")
     return tmp_path
 
@@ -178,25 +193,25 @@ def test_scan_includes_video_excludes_non_media(mixed_media):
     idx = scan_medias(mixed_media)
     files = idx["tv"][2024][6][1]
     assert files == [
-        "202406010900.mp3",
-        "202406011000.mp4",
-        "202406011100.mkv",
-        "202406011200.ts",
+        "20240601090000.mp3",
+        "20240601100000.mp4",
+        "20240601110000.mkv",
+        "20240601120000.ts",
     ]
     assert "notes.txt" not in files
-    assert "202406011300.json" not in files  # .json is not a media ext
+    assert "20240601130000.json" not in files  # .json is not a media ext
 
 
 def test_expand_picks_up_video(mixed_media):
     files = expand_selections(mixed_media)
-    assert "tv/2024/06/01/202406011000.mp4" in files
-    assert "tv/2024/06/01/202406011100.mkv" in files
+    assert "tv/2024/06/01/20240601100000.mp4" in files
+    assert "tv/2024/06/01/20240601110000.mkv" in files
 
 
 def test_expand_hour_filter_across_extensions(mixed_media):
     # 10:00 (mp4) and 11:00 (mkv) only
     files = expand_selections(mixed_media, hours={10, 11})
     assert files == [
-        "tv/2024/06/01/202406011000.mp4",
-        "tv/2024/06/01/202406011100.mkv",
+        "tv/2024/06/01/20240601100000.mp4",
+        "tv/2024/06/01/20240601110000.mkv",
     ]

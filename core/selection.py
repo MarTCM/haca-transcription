@@ -3,7 +3,7 @@ Medias-tree scanning and selection expansion.
 
 The medias hierarchy is::
 
-    medias/{channel}/{year}/{month}/{day}/{YYYYMMDDHHMM}.mp3
+    medias/{channel}/{year}/{month}/{day}/{YYYYMMDDHHMMSS}.mp3
 
 This module turns coarse filters (channels, years, months, days, hours — any of
 which may be omitted to mean "all") into a concrete, sorted list of relative
@@ -31,9 +31,11 @@ MEDIA_EXTS = {
     ".mp4", ".mkv", ".mka", ".mov", ".webm", ".avi", ".ts", ".m4v",
 }
 
-# A medias filename is YYYYMMDDHHMM + any media extension, e.g. 202406010900.mp3
-# or 202406010900.mp4.
-_FILENAME_RE = re.compile(r"^(?P<stamp>\d{12})\.[A-Za-z0-9]+$")
+# A medias filename is a date-time stamp + any media extension. The current
+# export uses 14 digits (YYYYMMDDHHMMSS, e.g. 20240601090000.mp3); the older
+# 12-digit form (YYYYMMDDHHMM, e.g. 202406010900.mp3) is still accepted. The
+# broadcast hour sits at positions 8-9 in both layouts.
+_FILENAME_RE = re.compile(r"^(?P<stamp>\d{12}(?:\d{2})?)\.[A-Za-z0-9]+$")
 
 # Nested index type: channel -> year -> month -> day -> [filenames]
 MediaIndex = Dict[str, Dict[int, Dict[int, Dict[int, List[str]]]]]
@@ -158,15 +160,16 @@ def scan_medias(root: Union[str, Path]) -> MediaIndex:
 
 
 def hour_of(filename: str) -> Optional[int]:
-    """Extract the broadcast hour (0-23) from a ``YYYYMMDDHHMM.<ext>`` filename.
+    """Extract the broadcast hour (0-23) from a ``YYYYMMDDHHMMSS.<ext>`` filename.
 
-    Works for any media extension (``.mp3``, ``.mp4``, ...). Returns ``None`` if
-    the filename doesn't match the 12-digit stamp pattern.
+    Also accepts the legacy 12-digit ``YYYYMMDDHHMM`` form. Works for any media
+    extension (``.mp3``, ``.mp4``, ...). Returns ``None`` if the filename doesn't
+    match the stamp pattern.
     """
     m = _FILENAME_RE.match(filename)
     if not m:
         return None
-    stamp = m.group("stamp")  # YYYYMMDDHHMM
+    stamp = m.group("stamp")  # YYYYMMDDHHMM[SS]
     return int(stamp[8:10])
 
 
@@ -190,7 +193,7 @@ def expand_selections(
 
     Any filter passed as ``None`` (or an empty set) means "all" for that level.
     Paths are returned relative to ``root`` using forward slashes, e.g.
-    ``"al-oula/2024/06/01/202406010900.mp3"``.
+    ``"al-oula/2024/06/01/20240601090000.mp3"``.
 
     Args:
         root: medias root directory.

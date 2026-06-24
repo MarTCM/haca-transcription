@@ -16,8 +16,8 @@ from core.summary import FileResult, STATUS_COMPLETED, STATUS_FAILED  # noqa: E4
 @pytest.fixture
 def medias(tmp_path):
     layout = {
-        "al-oula/2024/06/01": ["202406010900", "202406011000", "202406012300"],
-        "2m/2024/06/02": ["202406020900", "202406021800"],
+        "al-oula/2024/06/01": ["20240601090000", "20240601100000", "20240601230000"],
+        "2m/2024/06/02": ["20240602090000", "20240602180000"],
     }
     for rel, stamps in layout.items():
         d = tmp_path / "medias" / rel
@@ -82,10 +82,10 @@ def test_dry_run_lists_files(medias, capsys):
                    "--hours", "9-12", "--dry-run"])
     assert rc == cli.EXIT_OK
     out = capsys.readouterr().out.splitlines()
-    assert "al-oula/2024/06/01/202406010900.mp3" in out
-    assert "al-oula/2024/06/01/202406011000.mp3" in out
+    assert "al-oula/2024/06/01/20240601090000.mp3" in out
+    assert "al-oula/2024/06/01/20240601100000.mp3" in out
     # 23:00 excluded by the hour filter
-    assert "al-oula/2024/06/01/202406012300.mp3" not in out
+    assert "al-oula/2024/06/01/20240601230000.mp3" not in out
 
 
 def test_missing_medias_dir(tmp_path):
@@ -134,7 +134,7 @@ def test_full_run_all_ok(medias, tmp_path, monkeypatch):
 
 def test_full_run_with_failure_sets_exit_code(medias, tmp_path, monkeypatch):
     def stub_run(root, rel, cfg, bundle):
-        if rel.endswith("202406020900.mp3"):
+        if rel.endswith("20240602090000.mp3"):
             return FileResult(rel, STATUS_FAILED, error="boom")
         return FileResult(rel, STATUS_COMPLETED, processing_seconds=1.0)
 

@@ -5,8 +5,8 @@ Produces the exact log-line format shared with the Transcription UI's per-job
 logs, so a CLI run and a UI job log look identical::
 
     [JOB START]  2026-06-23T14:30:00 | 120 files | pipeline=whisperx | ...
-    [OK]         2026-06-23T14:30:05 | al-oula/2024/06/01/202406010000.mp3 | 4.2s
-    [FAIL]       2026-06-23T15:45:12 | 2m/2024/06/01/202406010500.mp3 | CUDA out of memory
+    [OK]         2026-06-23T14:30:05 | al-oula/2024/06/01/20240601000000.mp3 | 4.2s
+    [FAIL]       2026-06-23T15:45:12 | 2m/2024/06/01/20240601050000.mp3 | CUDA out of memory
     [JOB END]    2026-06-23T15:46:00 | completed | 120/120 | 118 ok, 2 failed
 
 The :class:`RunSummary` object accumulates per-file results so a caller can emit
