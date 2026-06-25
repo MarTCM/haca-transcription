@@ -108,7 +108,10 @@ run the CLI directly — no image build needed. `core/runner.py` adds `src/` to
 ### Prerequisites
 
 - NVIDIA driver compatible with CUDA 12.x (`nvidia-smi` should work) for GPU runs.
-- `git`, Python 3.10+ and `pip`.
+- `git` and **Python 3.10–3.12** with `pip`. Use a 64-bit Python. **Not 3.13+/3.14**:
+  PyTorch's `cu124` wheels are built only for Python 3.9–3.13, and no torch release
+  yet has 3.14 wheels — installing on too-new a Python fails with *"Could not find a
+  version that satisfies the requirement torch"*. Python 3.12 is the safe choice.
 - `ffmpeg` on `PATH` **only** if you'll use `--speaker-annotation` (WhisperX);
   plain faster-whisper bundles its own decoder (PyAV), video included.
 
@@ -118,7 +121,7 @@ run the CLI directly — no image build needed. `core/runner.py` adds `src/` to
 git clone https://github.com/MarTCM/haca-transcription.git
 cd haca-transcription
 
-python3 -m venv .venv
+python3.12 -m venv .venv   # use a 3.10-3.12 interpreter (not 3.13+/3.14)
 source .venv/bin/activate
 python -m pip install --upgrade pip
 
@@ -144,8 +147,9 @@ test with `--model tiny`).
 git clone https://github.com/MarTCM/haca-transcription.git
 cd haca-transcription
 
-py -3 -m venv .venv
+py -3.12 -m venv .venv     # 3.12 recommended; `py -0p` lists installed versions
 .\.venv\Scripts\Activate.ps1
+python --version           # confirm it says 3.12.x (or 3.10/3.11), not 3.13+/3.14
 python -m pip install --upgrade pip
 
 # CUDA-matched torch FIRST:
@@ -304,6 +308,7 @@ Every run writes a log whose lines match the format shared with the web UI:
 | `cannot load libcudnn / libcublas` (native, Linux) | CTranslate2 can't find the cuDNN/cuBLAS shipped in the torch wheel. Add them to the loader path: `export LD_LIBRARY_PATH=$(python -c "import os,nvidia.cudnn,nvidia.cublas; print(':'.join(os.path.join(os.path.dirname(m.__file__),'lib') for m in [nvidia.cudnn, nvidia.cublas]))"):$LD_LIBRARY_PATH`. Or verify the pipeline first with `--device cpu`. |
 | `cannot load cudnn*.dll` (native, Windows) | Add the wheel's CUDA DLL dirs to `PATH`, e.g. `.venv\Lib\site-packages\nvidia\cudnn\bin` and `...\nvidia\cublas\bin`, then reopen the shell. Or test with `--device cpu` first. |
 | `Activate.ps1 cannot be loaded` (Windows) | PowerShell execution policy. Use `.\.venv\Scripts\activate.bat` (cmd) or run `powershell -ExecutionPolicy Bypass -File .\.venv\Scripts\Activate.ps1`. |
+| `Could not find a version that satisfies the requirement torch` (native) | No torch wheel for your interpreter. Usually Python is too new (cu124 wheels cover 3.9–3.13; nothing supports 3.14 yet) or it's 32-bit. Recreate the venv with 64-bit **Python 3.10–3.12** (`py -3.12 -m venv .venv` on Windows). Confirm with `python --version` and `python -c "import struct;print(struct.calcsize('P')*8)"`. |
 | Build fails with `ReadTimeoutError` / `Read timed out` during `pip install` | A large wheel timed out on a slow/flaky link (the cu124 torch stack is ~2.5 GB). The Dockerfile uses a BuildKit pip **cache mount** + split layers, so downloads are **resumable**: just re-run `docker build` and it continues from the cached wheels instead of restarting. Requires BuildKit (default in modern Docker; otherwise prefix `DOCKER_BUILDKIT=1`). On a very slow link, raise `--timeout` further. For a **native** install, pip caches by default — just re-run the same `pip install`. |
 | `0 files matched the given filters.` (exit 2) | Filters too narrow or wrong `--medias` path; try `--dry-run`. |
 | `--speaker-annotation` errors about token (exit 2) | Pass `--hf-token` or set `$HF_TOKEN` (`$env:HF_TOKEN` / `set HF_TOKEN=` on Windows). |
