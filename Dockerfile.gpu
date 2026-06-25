@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # GPU image for the batch transcription CLI.
 #
 # Why a CUDA+cuDNN base: faster-whisper runs on CTranslate2, which dynamically
@@ -37,13 +38,37 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Install dependencies first for better layer caching.
-# - requirements.txt:          faster-whisper + transformers + peft (Darija LoRA)
-# - requirements_whisperx.txt: whisperx + pyannote (only used by --speaker-annotation)
-# - torch (CUDA 12.4 build):   required by WhisperX, the LoRA, and the --device auto probe
+# IMPORTANT: install the CUDA-matched torch FIRST. transformers/peft/accelerate
+# all declare a `torch` dependency, so if requirements.txt is installed first pip
+# pulls the generic PyPI torch (~530 MB) + triton (~200 MB) only to have it
+# replaced by the cu124 build below -- torch ends up downloaded twice. Installing
+# the cu124 torch first satisfies that dependency so requirements never fetch the
+# PyPI build. torchaudio is included because WhisperX needs it and must match
+# torch's CUDA.
+#
+# FLAKY/SLOW NETWORKS: the cu124 torch stack is ~2.5 GB across several large
+# wheels (torch ~768 MB, nvidia-cusparse ~207 MB, nvidia-cusolver ~128 MB, ...),
+# and a single stalled read aborts the whole step. To make builds *resumable*:
+#   1. A BuildKit pip cache mount persists already-downloaded wheels across build
+#      attempts, so a re-run continues from where it timed out instead of
+#      restarting the multi-GB download. (This is why we do NOT use
+#      --no-cache-dir here -- it would defeat the cache.)
+#   2. Each install is its own layer, so once a layer completes Docker caches it
+#      and never re-runs it.
+#   3. --timeout 1000 / --retries 10 tolerate long stalls.
+# If a build still times out, simply re-run `docker build` -- it will pick up the
+# cached wheels and make forward progress each time.
+# - torch/torchaudio (CUDA 12.4): WhisperX, the LoRA, and the --device auto probe
+# - requirements.txt:             faster-whisper + transformers + peft (Darija LoRA)
+# - requirements_whisperx.txt:    whisperx + pyannote (only used by --speaker-annotation)
 COPY requirements.txt requirements_whisperx.txt ./
-RUN pip3 install --no-cache-dir -r requirements.txt \
-    && pip3 install --no-cache-dir -r requirements_whisperx.txt \
-    && pip3 install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu124
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip3 install --retries 10 --timeout 1000 \
+        torch torchaudio --index-url https://download.pytorch.org/whl/cu124
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip3 install --retries 10 --timeout 1000 -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip3 install --retries 10 --timeout 1000 -r requirements_whisperx.txt
 
 # Copy the project (core/, cli.py, src/, ...). See .dockerignore for exclusions.
 COPY . .
