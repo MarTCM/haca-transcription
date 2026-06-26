@@ -107,13 +107,16 @@ run the CLI directly — no image build needed. `core/runner.py` adds `src/` to
 
 ### Prerequisites
 
-- NVIDIA driver compatible with CUDA 12.x (`nvidia-smi` should work) for GPU runs.
-- `git` and **Python 3.10–3.12** with `pip`. Use a 64-bit Python. **Not 3.13+/3.14**:
-  PyTorch's `cu124` wheels are built only for Python 3.9–3.13, and no torch release
-  yet has 3.14 wheels — installing on too-new a Python fails with *"Could not find a
-  version that satisfies the requirement torch"*. Python 3.12 is the safe choice.
-- `ffmpeg` on `PATH` **only** if you'll use `--speaker-annotation` (WhisperX);
-  plain faster-whisper bundles its own decoder (PyAV), video included.
+- NVIDIA driver for GPU runs (`nvidia-smi` should work). The CUDA channel you install
+  torch from must match the driver: **cu128** needs driver ~570+, **cu126** suits older drivers.
+- `git` and **Python 3.10–3.12** with `pip` (64-bit). **Not 3.14**: PyTorch publishes wheels
+  only up to Python 3.13, so a too-new Python fails with *"Could not find a version that
+  satisfies the requirement torch"*. Python 3.12 is the safe choice.
+- **`ffmpeg` on `PATH`.** faster-whisper's own decode uses bundled PyAV (no FFmpeg, video
+  included), **but** the default **Darija LoRA** path and `--speaker-annotation` go through
+  `transformers`/`torchcodec`, which needs the system FFmpeg libraries. Install it —
+  Linux `apt install ffmpeg`, macOS `brew install ffmpeg`, Windows `winget install Gyan.FFmpeg`
+  (reopen the shell afterwards). Without it you hit *"Could not load libtorchcodec"*.
 
 ### Linux / macOS
 
@@ -125,10 +128,13 @@ python3.12 -m venv .venv   # use a 3.10-3.12 interpreter (not 3.13+/3.14)
 source .venv/bin/activate
 python -m pip install --upgrade pip
 
-# CUDA-matched torch FIRST (so requirements don't pull a CPU torch):
-pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
+# CUDA-matched torch FIRST, pinned to 2.8.0 so it satisfies whisperx/pyannote
+# (which require torch~=2.8.0). Pick the channel for your driver: cu128 (>=570) or cu126.
+pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 \
+    --index-url https://download.pytorch.org/whl/cu128
 pip install -r requirements.txt
 pip install -r requirements_whisperx.txt      # only for --speaker-annotation
+pip install "torchcodec==0.7.*"               # decode backend for the LoRA + WhisperX paths
 
 export HF_TOKEN=hf_xxx                         # only for --speaker-annotation
 
@@ -137,9 +143,9 @@ python cli.py --medias /data/medias --channel al-oula --year 2024 --month 6 --dr
 python cli.py --medias /data/medias --channel al-oula --year 2024 --month 6
 ```
 
-For a **CPU-only** machine, install plain torch instead
-(`pip install torch torchaudio`) and pass `--device cpu` (slow — fine for a smoke
-test with `--model tiny`).
+For a **CPU-only** machine, install the same pinned versions without the CUDA index
+(`pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0`) and pass `--device cpu`
+(slow — fine for a smoke test with `--model tiny`).
 
 ### Windows (PowerShell)
 
@@ -152,10 +158,12 @@ py -3.12 -m venv .venv     # 3.12 recommended; `py -0p` lists installed versions
 python --version           # confirm it says 3.12.x (or 3.10/3.11), not 3.13+/3.14
 python -m pip install --upgrade pip
 
-# CUDA-matched torch FIRST:
-pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
+# CUDA-matched torch FIRST, pinned to 2.8.0 (satisfies whisperx/pyannote which need
+# torch~=2.8.0). Pick the channel for your driver: cu128 (>=570) or cu126. One line each.
+pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu128
 pip install -r requirements.txt
 pip install -r requirements_whisperx.txt       # only for --speaker-annotation
+pip install "torchcodec==0.7.*"                # decode backend for the LoRA + WhisperX paths
 
 $env:HF_TOKEN = "hf_xxx"                        # only for --speaker-annotation
 
@@ -173,8 +181,12 @@ Windows notes:
   CLI flags identical to Linux.
 - The multi-line commands above are one-per-line; don't add `\` continuations
   (that's a shell-ism, not Windows).
-- `ffmpeg` (for `--speaker-annotation`) isn't bundled — install it (e.g.
-  `winget install Gyan.FFmpeg`) and reopen the shell so it's on `PATH`.
+- `ffmpeg` isn't bundled and **is needed by the Darija LoRA and `--speaker-annotation`
+  paths** (via torchcodec) — install it with `winget install Gyan.FFmpeg` and reopen the
+  shell so it's on `PATH`.
+- After installing torch, **verify CUDA is actually on** — check the build tag, not just
+  the bool: `python -c "import torch; print(torch.__version__, torch.cuda.is_available())"`
+  should print e.g. `2.8.0+cu128 True`. If it ends in `+cpu`, see the troubleshooting table.
 
 ### What to expect
 
@@ -308,7 +320,10 @@ Every run writes a log whose lines match the format shared with the web UI:
 | `cannot load libcudnn / libcublas` (native, Linux) | CTranslate2 can't find the cuDNN/cuBLAS shipped in the torch wheel. Add them to the loader path: `export LD_LIBRARY_PATH=$(python -c "import os,nvidia.cudnn,nvidia.cublas; print(':'.join(os.path.join(os.path.dirname(m.__file__),'lib') for m in [nvidia.cudnn, nvidia.cublas]))"):$LD_LIBRARY_PATH`. Or verify the pipeline first with `--device cpu`. |
 | `cannot load cudnn*.dll` (native, Windows) | Add the wheel's CUDA DLL dirs to `PATH`, e.g. `.venv\Lib\site-packages\nvidia\cudnn\bin` and `...\nvidia\cublas\bin`, then reopen the shell. Or test with `--device cpu` first. |
 | `Activate.ps1 cannot be loaded` (Windows) | PowerShell execution policy. Use `.\.venv\Scripts\activate.bat` (cmd) or run `powershell -ExecutionPolicy Bypass -File .\.venv\Scripts\Activate.ps1`. |
-| `Could not find a version that satisfies the requirement torch` (native) | No torch wheel for your interpreter. Usually Python is too new (cu124 wheels cover 3.9–3.13; nothing supports 3.14 yet) or it's 32-bit. Recreate the venv with 64-bit **Python 3.10–3.12** (`py -3.12 -m venv .venv` on Windows). Confirm with `python --version` and `python -c "import struct;print(struct.calcsize('P')*8)"`. |
+| `Could not find a version that satisfies the requirement torch` (native) | No torch wheel for your interpreter. Usually Python is too new (no torch wheels for 3.14) or it's 32-bit. Recreate the venv with 64-bit **Python 3.10–3.12** (`py -3.12 -m venv .venv` on Windows). Confirm with `python --version` and `python -c "import struct;print(struct.calcsize('P')*8)"`. |
+| `Could not load libtorchcodec` (native) | The Darija LoRA / WhisperX path uses `torchcodec`, which needs the system **FFmpeg** libraries (faster-whisper's own PyAV decode does not). Install FFmpeg (`winget install Gyan.FFmpeg` on Windows; `apt/brew install ffmpeg` otherwise) and reopen the shell. Quick check it's the LoRA: a run with `--no-darija-lora` uses only faster-whisper (no torchcodec) and should succeed. |
+| `torch.cuda.is_available()` is False / torch shows `+cpu` | The CPU wheel is installed. `pip install torch …` is a **no-op when torch is already present**, so the CUDA wheel never replaced it. Force it: `python -m pip uninstall -y torch torchvision torchaudio` then reinstall pinned from the CUDA channel (below). Confirm the printed version ends in `+cu128`/`+cu126`, and that `nvidia-smi` works (no NVIDIA GPU → CUDA can't be enabled). Use `python -m pip` so it hits the same interpreter you test with. |
+| `pip ... dependency conflicts: whisperx requires torch~=2.8.0 but you have 2.11.0` | The unpinned install pulled the newest torch; whisperx/pyannote pin the stack to 2.8.0. Reinstall pinned: `python -m pip install --force-reinstall --index-url https://download.pytorch.org/whl/cu128 torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0` then `python -m pip install "torchcodec==0.7.*"`. |
 | Build fails with `ReadTimeoutError` / `Read timed out` during `pip install` | A large wheel timed out on a slow/flaky link (the cu124 torch stack is ~2.5 GB). The Dockerfile uses a BuildKit pip **cache mount** + split layers, so downloads are **resumable**: just re-run `docker build` and it continues from the cached wheels instead of restarting. Requires BuildKit (default in modern Docker; otherwise prefix `DOCKER_BUILDKIT=1`). On a very slow link, raise `--timeout` further. For a **native** install, pip caches by default — just re-run the same `pip install`. |
 | `0 files matched the given filters.` (exit 2) | Filters too narrow or wrong `--medias` path; try `--dry-run`. |
 | `--speaker-annotation` errors about token (exit 2) | Pass `--hf-token` or set `$HF_TOKEN` (`$env:HF_TOKEN` / `set HF_TOKEN=` on Windows). |
