@@ -21,7 +21,7 @@ def test_defaults_are_recommended():
     assert cfg.model == "large-v3"
     assert cfg.darija_lora is True
     assert cfg.language == "auto"
-    assert cfg.allowed_langs == ("ar", "fr", "en")
+    assert cfg.allowed_langs == ("ar", "fr", "en", "es")
     assert cfg.speaker_annotation is False
     assert cfg.out_dir == "out/srt"
 

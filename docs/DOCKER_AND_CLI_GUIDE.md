@@ -57,7 +57,7 @@ inclusive range (`9-18`). Reversed ranges (`18-9`) are rejected.
 | `--model` | `large-v3` | faster-whisper model size or local path. |
 | `--darija-lora` / `--no-darija-lora` | on | Route Arabic chunks through the Darija LoRA. |
 | `--lang` | `auto` | `auto` per-chunk detection, or a forced code (`ar`/`fr`/`en`). |
-| `--allowed` | `ar,fr,en` | Allow-list for auto language detection. |
+| `--allowed` | `ar,fr,en,es` | Allow-list for auto language detection. |
 | `--max-chunk-s` | `25.0` | Max VAD chunk length (seconds). |
 | `--device` | `auto` | `auto` / `cuda` / `cpu`. |
 | `--overwrite` | off | Re-transcribe even if the `.srt` exists (otherwise skipped). |

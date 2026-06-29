@@ -55,7 +55,7 @@ python src/transcribe.py --input journal.mp3 --lang ar --out-dir out/
 | `--model`       | `large-v3`  | faster-whisper model size or local path.                       |
 | `--device`      | `auto`      | `auto` / `cuda` / `cpu`.                                        |
 | `--lang`        | `auto`      | `auto` = per-chunk detection; or force a code (`ar`, `fr`...).  |
-| `--allowed`     | `ar,fr,en`  | Allow-list for auto detection; off-list → falls back to `ar`.  |
+| `--allowed`     | `ar,fr,en,es`  | Allow-list for auto detection; off-list → falls back to `ar`.  |
 | `--max-chunk-s` | `25`        | Max chunk length (seconds); chunks break only at silence.      |
 | `--overwrite`   | off         | Re-transcribe even if the `.srt` already exists.               |
 

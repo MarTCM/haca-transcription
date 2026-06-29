@@ -22,7 +22,7 @@ PIPELINE_FASTER_WHISPER = "faster-whisper"
 PIPELINE_WHISPERX = "whisperx"
 VALID_PIPELINES = (PIPELINE_FASTER_WHISPER, PIPELINE_WHISPERX)
 
-DEFAULT_ALLOWED: Tuple[str, ...] = ("ar", "fr", "en")
+DEFAULT_ALLOWED: Tuple[str, ...] = ("ar", "fr", "en", "es")
 DEFAULT_OUT_DIR = "out/srt"
 
 # Darija LoRA adapter (anaszil on large-v3-turbo) — the recommended Darija setup.

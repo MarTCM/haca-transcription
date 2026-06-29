@@ -66,7 +66,7 @@ python cli.py [--medias DIR]
   --model       large-v3         faster-whisper model size or local path
   --darija-lora / --no-darija-lora   default ON (route 'ar' chunks through anaszil LoRA)
   --lang        auto             'auto' = per-chunk detection, or a forced code (ar/fr/en...)
-  --allowed     ar,fr,en         allow-list for auto detection
+  --allowed     ar,fr,en,es      allow-list for auto detection
   --max-chunk-s 25
   --device      auto             {auto, cuda, cpu}
   --overwrite                    re-transcribe even if .srt exists

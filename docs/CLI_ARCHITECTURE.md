@@ -149,7 +149,7 @@ Fields (grouped):
 | model | `model` | `"large-v3"` | faster-whisper model size or local path |
 | model | `darija_lora` | `True` | route `ar` chunks through the anaszil Darija LoRA |
 | model | `language` | `"auto"` | `auto` = per-chunk detection, or a forced code |
-| model | `allowed_langs` | `("ar","fr","en")` | allow-list when `language=="auto"` |
+| model | `allowed_langs` | `("ar","fr","en","es")` | allow-list when `language=="auto"` |
 | model | `max_chunk_s` | `25.0` | max VAD chunk length (seconds) |
 | model | `device` | `"auto"` | `auto` / `cuda` / `cpu` |
 | model | `overwrite` | `False` | re-transcribe even if `.srt` exists |
@@ -373,7 +373,7 @@ python cli.py --channel 2m --year 2024 --month 6 --day 1 \
 | `--model` | `large-v3` | model size or local path |
 | `--darija-lora` / `--no-darija-lora` | on | Darija LoRA routing for `ar` chunks |
 | `--lang` | `auto` | `auto` per-chunk, or a forced code |
-| `--allowed` | `ar,fr,en` | allow-list for auto detection |
+| `--allowed` | `ar,fr,en,es` | allow-list for auto detection |
 | `--max-chunk-s` | `25` | max VAD chunk length (seconds) |
 | `--device` | `auto` | `auto` / `cuda` / `cpu` |
 | `--overwrite` | off | re-transcribe even if `.srt` exists |

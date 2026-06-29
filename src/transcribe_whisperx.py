@@ -48,7 +48,7 @@ MEDIA_EXTS = {
 }
 
 SAMPLE_RATE = 16000
-DEFAULT_ALLOWED = ("ar", "fr", "en")
+DEFAULT_ALLOWED = ("ar", "fr", "en", "es")
 
 ARABIC_ALIGN_MODEL = "boualin/wav2vec2-large-xlsr-53-arabic"
 
