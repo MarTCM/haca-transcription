@@ -1,0 +1,10 @@
+# Dependencies for transcription/tools/fetch_youtube.py
+#
+# Also requires a SYSTEM ffmpeg on PATH for audio extraction:
+#   Debian/Ubuntu : sudo apt install ffmpeg
+#   macOS (brew)  : brew install ffmpeg
+#   Windows       : winget install Gyan.FFmpeg
+#
+# yt-dlp ships frequent releases to keep up with YouTube changes; pin to a
+# recent baseline but allow forward updates.
+yt-dlp>=2025.1.1
