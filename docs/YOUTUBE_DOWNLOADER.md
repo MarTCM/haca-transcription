@@ -985,7 +985,7 @@ network and no ffmpeg — covering archive skips, filesystem backfill, idempoten
 |-------|----------------------|
 | `test_slugify_channel*` | `slugify_channel` (illegal chars, whitespace, unicode, empties) |
 | `test_stamp*` | `stamp_from_info` (timestamp vs upload_date, UTC, failures) |
-| `test_month_from_stamp`, `test_dest_path*` | path building |
+| `test_sanitize_filename*`, `test_dest_path*` | filename sanitising + path building |
 | `test_normalize_channel_url` | URL `/videos` normalisation |
 | `test_archive_key*`, `test_entry_url*` | archive line + watch URL helpers |
 | `test_load_archive*`, `test_append_then_load_archive` | archive I/O |
@@ -1011,30 +1011,54 @@ pip install -r transcription/tools/requirements-youtube.txt
 sudo apt install ffmpeg     # Debian/Ubuntu
 ```
 
-### 7.1b JavaScript runtime (recommended)
+### 7.1b JavaScript runtime + solver (required by recent yt-dlp)
 
-Recent yt-dlp needs a JavaScript runtime to solve YouTube's signature/`nsig`
-challenges. Without one you'll see a `No supported JavaScript runtime could be
-found` warning; extraction may still work but can fail or miss formats, and
-runtime-less extraction is **deprecated**. yt-dlp auto-detects **deno** (its
-default), so the smoothest fix is to install deno and pass nothing:
+Recent yt-dlp solves YouTube's signature/`nsig` challenges with JavaScript, and a
+provider only becomes available when **both** of these are present:
 
-```bash
-curl -fsSL https://deno.land/install.sh | sh   # then add ~/.deno/bin to PATH
+1. **A JS runtime** on `PATH` — yt-dlp auto-detects **deno** (>= 2.3.0):
+   ```bash
+   curl -fsSL https://deno.land/install.sh | sh   # then put ~/.deno/bin on PATH
+   ```
+2. **The challenge-solver script** — install the `yt-dlp-ejs` Python package
+   (already listed in `requirements-youtube.txt`); it ships the script and works
+   offline, so no `--remote-components` flag is needed:
+   ```bash
+   pip install yt-dlp-ejs
+   ```
+
+If either is missing you get the warning:
+
+```
+WARNING: [youtube] No supported JavaScript runtime could be found. ...
 ```
 
-To use a different runtime, pass `--js-runtimes`:
+Extraction may still limp along JS-less (deprecated, some formats missing).
+
+> **Gotcha — the "two denos" trap.** The warning can persist *even after you
+> install deno* if a **broken or older `deno` sits earlier on `PATH`** (a common
+> culprit is a distro `/usr/bin/deno` that crashes with
+> `symbol lookup error: undefined symbol: sqlite3...`). yt-dlp probes bare `deno`,
+> hits the broken one, and concludes no runtime exists. Diagnose with:
+> ```bash
+> command -v deno        # which deno wins on PATH?
+> deno --version         # does THAT one actually run? (exit 0 + a version)
+> ```
+> Fixes, in order of preference:
+> - Put your good runtime first: `export PATH="$HOME/.deno/bin:$PATH"` in `~/.bashrc`.
+> - Or point the tool straight at it: `--js-runtimes deno:$HOME/.deno/bin/deno`.
+> - Or remove the broken system deno.
+
+To use a different runtime, pass `--js-runtimes` (repeatable, `RUNTIME[:PATH]`):
 
 ```bash
 python transcription/tools/fetch_youtube.py --url <CHANNEL> --js-runtimes node
-python transcription/tools/fetch_youtube.py --url <CHANNEL> --js-runtimes deno:/opt/deno
+python transcription/tools/fetch_youtube.py --url <CHANNEL> --js-runtimes deno:$HOME/.deno/bin/deno
 ```
 
-> Note: with some runtimes (e.g. `node`) this yt-dlp version may additionally ask
-> for `--remote-components ejs:github` to fetch its challenge-solver script.
-> `deno` avoids that extra step, which is why it's the recommended choice. Also
-> keep yt-dlp current (`pip install -U yt-dlp`) — stale versions are the usual
-> cause of extraction breakage.
+> `node`/`bun` may additionally need `--remote-components ejs:github`; `deno`
+> with `yt-dlp-ejs` avoids that. Also keep yt-dlp current (`pip install -U
+> yt-dlp`) — stale versions are the usual cause of extraction breakage.
 
 ### 7.2 Big channels and the `--scan-limit` window
 

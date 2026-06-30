@@ -8,3 +8,13 @@
 # yt-dlp ships frequent releases to keep up with YouTube changes; pin to a
 # recent baseline but allow forward updates.
 yt-dlp>=2025.1.1
+
+# Recent yt-dlp needs a JavaScript runtime PLUS a challenge-solver script to
+# extract YouTube. yt-dlp-ejs provides the solver script as a Python package
+# (used offline, no --remote-components flag needed). You ALSO need a working JS
+# runtime on PATH — yt-dlp auto-detects "deno" (>= 2.3.0).
+#   deno : curl -fsSL https://deno.land/install.sh | sh   (then put ~/.deno/bin on PATH)
+# Gotcha: if a broken/older `deno` is earlier on PATH (e.g. /usr/bin/deno), yt-dlp
+# will use it and fail. Either fix PATH so the good deno wins, or pass an explicit
+# path: --js-runtimes deno:/home/<you>/.deno/bin/deno
+yt-dlp-ejs>=0.8.0
