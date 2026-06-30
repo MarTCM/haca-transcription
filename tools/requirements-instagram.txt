@@ -1,0 +1,10 @@
+# Dependencies for transcription/tools/fetch_instagram.py
+#
+# Also requires a SYSTEM ffmpeg on PATH for audio extraction:
+#   Debian/Ubuntu : sudo apt install ffmpeg
+#   macOS (brew)  : brew install ffmpeg
+#   Windows       : winget install Gyan.FFmpeg
+#
+# instaloader handles Instagram login/session + profile listing + downloading.
+# It changes often to track Instagram; pin a recent baseline, allow updates.
+instaloader>=4.14

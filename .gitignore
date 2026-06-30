@@ -16,6 +16,9 @@ models/
 samples/*
 !samples/.gitkeep
 out/
+# Downloader output trees (media + dedup archive + Instagram session secrets)
+youtube/
+instagram/
 *.srt
 *.mp3
 *.mp4
