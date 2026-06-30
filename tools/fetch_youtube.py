@@ -40,14 +40,22 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, List, Optional, Tuple
 
+from _media_common import (
+    DEFAULT_SCAN_LIMIT,
+    append_archive,
+    dest_for,
+    load_archive,
+    make_logger,
+    sanitize_filename,
+    slugify_channel,
+    stamp_from_datetime,
+)
+
 # ----------------------------------------------------------------------------- #
 # Pure helpers (no network, no yt-dlp) — these are the unit-tested core.
+# Generic helpers (slugify, sanitize, archive, logger, dest_for) live in
+# _media_common; below are the YouTube/yt-dlp-specific ones.
 # ----------------------------------------------------------------------------- #
-
-# Characters that are illegal in file/folder names on common filesystems
-# (Windows is the strictest), plus ASCII control characters. We keep everything
-# else, including non-Latin letters, so an Arabic channel title stays readable.
-_ILLEGAL_FS = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 
 # A bare channel URL whose path is just the channel identifier (no /videos,
 # /streams, /playlists tab). We append /videos to these so yt-dlp returns the
@@ -55,27 +63,6 @@ _ILLEGAL_FS = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 _CHANNEL_ROOT = re.compile(
     r"youtube\.com/(@[^/]+|channel/[^/]+|c/[^/]+|user/[^/]+)$", re.IGNORECASE
 )
-
-# How many of a channel's most-recent uploads to examine per run by default.
-# Bounds the listing so huge channels don't take forever before --max-downloads
-# applies. Override with --scan-limit (0 = no bound).
-DEFAULT_SCAN_LIMIT = 50
-
-
-def slugify_channel(title: Optional[str], fallback: str = "unknown-channel") -> str:
-    """Turn a channel title into a safe single-path-segment folder name.
-
-    Strips characters that are illegal in filenames, collapses runs of
-    whitespace to a single space, and trims leading/trailing spaces and dots
-    (trailing dots/spaces are invalid on Windows). Returns ``fallback`` when the
-    title is missing or reduces to nothing.
-    """
-    if not title:
-        return fallback
-    cleaned = _ILLEGAL_FS.sub("", title)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip()
-    cleaned = cleaned.strip(". ")
-    return cleaned or fallback
 
 
 def stamp_from_info(info: dict) -> str:
@@ -88,32 +75,13 @@ def stamp_from_info(info: dict) -> str:
     """
     ts = info.get("timestamp")
     if ts is not None:
-        return dt.datetime.fromtimestamp(int(ts), dt.timezone.utc).strftime(
-            "%Y%m%d%H%M%S"
-        )
+        return stamp_from_datetime(dt.datetime.fromtimestamp(int(ts), dt.timezone.utc))
     upload_date = info.get("upload_date")
     if upload_date and re.fullmatch(r"\d{8}", str(upload_date)):
         return f"{upload_date}000000"
     raise ValueError(
         "info dict has neither a usable 'timestamp' nor an 8-digit 'upload_date'"
     )
-
-
-def sanitize_filename(name: Optional[str], max_len: int = 150, fallback: str = "video") -> str:
-    """Turn a video title into a safe filename stem (no extension).
-
-    Same illegal-character / whitespace rules as :func:`slugify_channel`, plus a
-    length cap so we stay well under the 255-byte filesystem limit. Non-Latin
-    letters and emoji are preserved. Returns ``fallback`` if the title is missing
-    or sanitises to nothing.
-    """
-    if not name:
-        return fallback
-    cleaned = _ILLEGAL_FS.sub("", name)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip().strip(". ")
-    if len(cleaned) > max_len:
-        cleaned = cleaned[:max_len].rstrip(". ")
-    return cleaned or fallback
 
 
 def dest_path(out_root: Path, channel: str, info: dict, ext: str) -> Path:
@@ -124,9 +92,8 @@ def dest_path(out_root: Path, channel: str, info: dict, ext: str) -> Path:
     title).
     """
     stamp = stamp_from_info(info)
-    year, month = stamp[:4], stamp[4:6]
     title = sanitize_filename(info.get("title"), fallback=stamp)
-    return Path(out_root) / channel / year / month / f"{title}.{ext.lstrip('.')}"
+    return dest_for(out_root, channel, stamp, title, ext)
 
 
 def normalize_channel_url(url: str) -> str:
@@ -161,21 +128,6 @@ def entry_url(entry: dict) -> str:
         return f"https://www.youtube.com/watch?v={vid}"
     # Fall back to whatever URL the flat extractor gave us.
     return entry.get("url") or ""
-
-
-def load_archive(archive_path: Path) -> set:
-    """Read the download archive into a set of ``'<extractor> <id>'`` lines."""
-    if not archive_path.exists():
-        return set()
-    lines = archive_path.read_text(encoding="utf-8").splitlines()
-    return {ln.strip() for ln in lines if ln.strip()}
-
-
-def append_archive(archive_path: Path, key: str) -> None:
-    """Append one archive key, creating the file/parent dir if needed."""
-    archive_path.parent.mkdir(parents=True, exist_ok=True)
-    with archive_path.open("a", encoding="utf-8") as fh:
-        fh.write(key + "\n")
 
 
 def parse_js_runtimes(values: Optional[Iterable[str]]) -> Optional[dict]:
@@ -434,34 +386,6 @@ def _valid_since(value: str) -> str:
     if not re.fullmatch(r"\d{8}", value):
         raise argparse.ArgumentTypeError("--since must be YYYYMMDD, e.g. 20260101")
     return value
-
-
-def make_logger(log_path: Optional[Path]):
-    """Return ``(emit, close)``: ``emit(msg)`` prints to stdout and, when a log
-    path is given, also appends a timestamped copy to that file.
-
-    The console stays clean (no timestamps); the file lines are prefixed with an
-    ISO-ish ``YYYY-MM-DD HH:MM:SS`` for later auditing. ``close()`` closes the
-    file handle (a no-op when no log file is used). The log directory is created
-    if needed.
-    """
-    fh = None
-    if log_path is not None:
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        fh = log_path.open("a", encoding="utf-8")
-
-    def emit(msg: str) -> None:
-        print(msg)
-        if fh is not None:
-            ts = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            fh.write(f"{ts} {msg}\n")
-            fh.flush()
-
-    def close() -> None:
-        if fh is not None:
-            fh.close()
-
-    return emit, close
 
 
 def build_parser() -> argparse.ArgumentParser:
