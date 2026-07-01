@@ -1,0 +1,10 @@
+# Dependencies for transcription/tools/fetch_tiktok.py
+#
+# TikTok uses the same yt-dlp engine as fetch_youtube.py — no extra libraries.
+# Also requires a SYSTEM ffmpeg on PATH for audio extraction:
+#   Debian/Ubuntu : sudo apt install ffmpeg
+#   macOS (brew)  : brew install ffmpeg
+#
+# yt-dlp handles TikTok extraction natively; no JS runtime challenge system is
+# involved (unlike YouTube), so --js-runtimes / yt-dlp-ejs are not needed.
+yt-dlp>=2025.1.1
