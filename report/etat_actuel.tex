@@ -1,0 +1,339 @@
+% ============================================================
+%  Rapport d'etat — Pipeline de transcription broadcast -> SRT
+%  HACA / Direction des Systemes d'Information
+%  Auteur : Marwane ElBaraka
+%  Compiler : pdflatex (2 passes) ou Overleaf
+% ============================================================
+\documentclass[11pt, a4paper]{article}
+
+% ---------- Encodage & langue ----------
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+
+% ---------- Mise en page ----------
+\usepackage[top=2cm, bottom=2cm, left=2.4cm, right=2.4cm]{geometry}
+\usepackage{parskip}
+\setlength{\parindent}{0pt}
+\usepackage{lmodern}
+\usepackage{microtype}
+
+% ---------- Couleurs ----------
+\usepackage[dvipsnames, table]{xcolor}
+\definecolor{hacablue}{RGB}{0,70,127}
+\definecolor{goodgreen}{RGB}{0,150,80}
+\definecolor{warnorange}{RGB}{200,110,0}
+\definecolor{darkgray}{RGB}{80,80,80}
+
+% ---------- Tableaux ----------
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{colortbl}
+
+% ---------- Listes ----------
+\usepackage{enumitem}
+\setlist[itemize]{noitemsep, topsep=2pt, leftmargin=1.2em}
+\setlist[enumerate]{noitemsep, topsep=2pt, leftmargin=1.4em}
+
+% ---------- Code ----------
+\usepackage{listings}
+\lstset{basicstyle=\ttfamily\footnotesize, backgroundcolor=\color{gray!8},
+  frame=single, framerule=0.3pt, breaklines=true, columns=flexible, xleftmargin=2pt}
+
+% ---------- Titres ----------
+\usepackage{titlesec}
+\titleformat{\section}{\large\bfseries\color{hacablue}}{\thesection.}{0.5em}{}[\vspace{-3pt}\rule{\linewidth}{0.4pt}]
+\titleformat{\subsection}{\normalsize\bfseries\color{hacablue!80!black}}{\thesubsection.}{0.4em}{}
+\titlespacing*{\section}{0pt}{8pt}{4pt}
+\titlespacing*{\subsection}{0pt}{6pt}{2pt}
+
+% ---------- Boites ----------
+\usepackage{tcolorbox}
+\tcbuselibrary{skins, breakable}
+\newtcolorbox{resume}{colback=hacablue!5, colframe=hacablue!60,
+  fonttitle=\bfseries, title=Resume executif, boxrule=0.5pt, arc=2pt}
+
+% ---------- En-tete / pied ----------
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\textcolor{darkgray}{Rapport d'etat — Transcription broadcast}}
+\fancyhead[R]{\small\textcolor{darkgray}{HACA / DSI}}
+\fancyfoot[C]{\small\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\usepackage[hidelinks, colorlinks=true, linkcolor=hacablue, urlcolor=hacablue]{hyperref}
+
+% ============================================================
+\begin{document}
+
+\begin{center}
+  {\LARGE\bfseries\color{hacablue} Pipeline de transcription broadcast $\rightarrow$ SRT}\\[3pt]
+  {\large pour contenus en darija, arabe standard et francais}\\[8pt]
+  {\normalsize \textbf{Rapport d'etat}}\\[4pt]
+  {\small Stage d'initiation — HACA / Direction des Systemes d'Information}\\[1pt]
+  {\small Stagiaire : Marwane ElBaraka \quad|\quad Encadrante : Mme.~Amina Moujtahid \quad|\quad Date : \today}
+\end{center}
+
+\vspace{2pt}\rule{\linewidth}{0.8pt}\vspace{6pt}
+
+\begin{resume}
+Cet outil convertit des fichiers \textbf{audio/video} de diffusion en sous-titres
+\textbf{\texttt{.srt}} standard, pour des contenus en \textbf{darija marocain, arabe
+standard moderne (MSA) et francais}, y compris les fichiers qui \textbf{alternent} entre
+ces langues. Il est bati sur \textbf{faster-whisper} (Whisper \texttt{large-v3}) avec une
+\textbf{detection de langue par segment}, ce qui permet de transcrire nativement une
+emission multilingue. Deux pipelines coexistent : un pipeline leger (faster-whisper) et
+un pipeline \textbf{WhisperX} qui ajoute l'alignement mot-a-mot et la diarisation des
+locuteurs. Un \textbf{adaptateur LoRA Darija} ameliore la qualite sur l'arabe marocain.
+La sortie \texttt{.srt} est directement consommable par le benchmark de tonalite HACA :
+les deux projets ne partagent que le format de fichier.
+\end{resume}
+
+% ============================================================
+\section{Objectif et positionnement}
+% ============================================================
+
+Cet outil constitue la \emph{moitie amont} de la chaine d'analyse media : le benchmark de
+tonalite consommait deja des \texttt{.srt} mais il manquait un moyen d'en \emph{produire}
+a partir de diffusions brutes. Les deux projets sont volontairement separes ; ils ne
+partagent rien d'autre que le format \texttt{.srt}.
+
+Le defi principal est le \textbf{code-switching} : une emission marocaine peut s'ouvrir
+en francais, basculer en darija et citer du MSA. Whisper standard ne detecte qu'\emph{une}
+langue sur les $\sim$30 premieres secondes et l'applique a tout le fichier — ce qui est
+faux pour la majorite du contenu. La detection par segment resout ce probleme.
+
+% ============================================================
+\section{Architecture du pipeline}
+% ============================================================
+
+\begin{lstlisting}
+audio -> decode 16kHz mono -> VAD (Silero) -> chunks ~25s (coupe au silence)
+      -> detection langue par chunk (allow-list ar,fr,en)
+      -> transcription par chunk (condition_on_previous_text=False)
+      -> offset des timestamps -> ecriture .srt
+\end{lstlisting}
+
+\begin{enumerate}
+  \item \textbf{Decodage} en 16 kHz mono (PyAV, gere aussi la video).
+  \item \textbf{VAD Silero} : detection des zones de parole, le silence est ecarte.
+  \item \textbf{Regroupement} en segments d'au plus 25 s, coupes \emph{uniquement au silence} (jamais au milieu d'un mot).
+  \item \textbf{Detection de langue par chunk}, contrainte a une \textbf{allow-list} (\texttt{ar,fr,en}) ; hors-liste $\rightarrow$ repli sur \texttt{ar} (evite que du darija bruite soit pris pour du persan/ourdou).
+  \item \textbf{Transcription} de chaque chunk dans sa langue, avec \texttt{condition\_on\_previous\_text=False} pour eviter qu'une hallucination ne se propage.
+  \item \textbf{Decalage des timestamps} selon le debut absolu du chunk, puis ecriture du \texttt{.srt} (index, \texttt{HH:MM:SS,mmm}, UTF-8).
+\end{enumerate}
+
+% ============================================================
+\section{Deux pipelines}
+% ============================================================
+
+\begin{center}
+\small
+\begin{tabularx}{\linewidth}{lXX}
+\toprule
+ & \textbf{A — \texttt{transcribe.py}} & \textbf{B — \texttt{transcribe\_whisperx.py}} \\
+\midrule
+Moteur & faster-whisper (CTranslate2) & WhisperX (memes chunks) \\
+Dependances & legeres & lourdes (pyannote, ONNX) \\
+Atouts & transcription simple, batch, tests CPU, production T4 & alignement mot-a-mot (wav2vec2) + diarisation locuteurs \\
+Quand l'utiliser & besoin uniquement de \texttt{.srt} & besoin de locuteurs ou timings precis \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+Le pipeline B ajoute deux etapes optionnelles : \textbf{alignement} wav2vec2 par langue
+(francais natif ; arabe via le modele communautaire \texttt{boualin/wav2vec2-large-xlsr-53-arabic})
+et \textbf{diarisation} pyannote (prefixes \texttt{[SPEAKER\_XX]}). La diarisation est
+\emph{gated} : sans jeton HuggingFace valide (\texttt{--hf-token}), elle est silencieusement
+ignoree et la sortie reste une transcription simple.
+
+% ============================================================
+\section{Qualite Darija et adaptateur LoRA}
+% ============================================================
+
+Whisper n'a \textbf{pas de code dedie au darija} : le marocain est transcrit sous le code
+generique \texttt{ar}, en ecriture arabe. C'est le point faible (WER plus eleve que MSA/
+francais). Un comparatif a identifie l'adaptateur LoRA \texttt{anaszil/whisper-large-v3-turbo-darija}
+comme la meilleure option.
+
+\begin{center}
+\small
+\begin{tabular}{lccl}
+\toprule
+\textbf{Modele} & \textbf{Temps (1h audio)} & \textbf{WER} & \textbf{Note} \\
+\midrule
+\texttt{anaszil/...-darija} (LoRA) & $\sim$20 s & $\sim$25\,\% & \textbf{le plus rapide et le plus propre} \\
+\texttt{MaghrebVoice/...-large-v3} & $\sim$70 s & $\sim$26\,\% & fine-tune complet, 3,4$\times$ plus lent \\
+\texttt{large-v3-turbo} (base) & $\sim$15 s & $\sim$28\,\% & sans specialisation darija \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Routage hybride} (\texttt{--darija-lora}) : les chunks detectes \texttt{ar}
+passent par la LoRA (PyTorch/PEFT), les chunks \texttt{fr}/\texttt{en} restent sur
+CTranslate2 (plus rapide, qualite identique). On ne paie le cout de la LoRA que la ou
+elle aide.
+
+% ============================================================
+\section{Etat actuel et exemple reel}
+% ============================================================
+
+\textbf{Realise :}
+\begin{itemize}
+  \item Pipeline complet A (decodage $\rightarrow$ VAD $\rightarrow$ chunks $\rightarrow$ detection $\rightarrow$ transcription $\rightarrow$ SRT).
+  \item Pipeline B WhisperX (alignement + diarisation optionnels).
+  \item Detection de langue par chunk avec allow-list ; routage LoRA Darija.
+  \item Tests unitaires du redacteur SRT (round-trip de format).
+  \item Notebooks Kaggle (GPU T4) : transcription, WhisperX, comparatif modeles Darija, A/B base vs LoRA.
+\end{itemize}
+
+\textbf{Exemple — \texttt{mobachara\_ma3akom\_trimmed}} (talk-show politique, loi de
+finances 2026, \og Maroc a deux vitesses \fg{}, hote + 4 invites). La transcription est
+\textbf{coherente} : sujets, chiffres et noms correctement captures (\og 380 milliards de
+dirhams \fg{}, \og CAN 2026 \fg{}, \og Mondial 2030 \fg{}). La sortie diarisee distingue 5
+locuteurs de facon stable. Erreurs darija typiques mais mineures (quelques mots mal
+orthographies), sans gener la comprehension.
+
+% ============================================================
+\section{Limites et suite}
+% ============================================================
+
+\begin{itemize}
+  \item \textbf{WER Darija} : point faible structurel ; la LoRA \texttt{anaszil} l'attenue mais ne l'elimine pas.
+  \item \textbf{Pas de re-segmentation des sous-titres} : les bornes natives de Whisper sont conservees, d'ou des cues longues (20--24 s) peu confortables pour un affichage humain (acceptables pour le TALN en aval).
+  \item \textbf{Diarisation \emph{gated}} : necessite un jeton HuggingFace et l'acceptation des conditions pyannote.
+  \item \textbf{Robustesse} : musique, bruit et parole superposee peuvent produire des cues hallucinees ; le \og garble gate \fg{} du benchmark (\texttt{asr\_quality.py}) sert de filet en aval.
+  \item \textbf{Travaux futurs} : re-segmentation a budget de caracteres, controle d'un eventuel trou de transcription ($\sim$24 s observe sur l'echantillon), exploration d'un modele Darija dedie.
+\end{itemize}
+
+\vspace{4pt}
+\rule{\linewidth}{0.4pt}\\[2pt]
+{\footnotesize\itshape Sources : \texttt{docs/PIPELINE.md}, \texttt{docs/TRANSCRIPTION.md},
+\texttt{docs/WHISPERX\_GUIDE.md}, \texttt{notebooks/} (runners Kaggle et comparatifs).}
+
+% ============================================================
+\section{Outils d'ingestion des medias}
+% ============================================================
+
+Pour alimenter le pipeline de transcription, deux scripts de telechargement audio ont ete
+developpes. Ils constituent la \emph{couche zero} de la chaine : collecter les diffusions
+depuis les plateformes sociales (YouTube, Instagram) et les deposer dans une arborescence
+normalisee avant que \texttt{transcribe.py} ne les traite.
+
+% ------------------------------------------------------------
+\subsection{Telechargeur YouTube incremental — \texttt{fetch\_youtube.py}}
+% ------------------------------------------------------------
+
+\textbf{Objectif.} Telecharger en batch l'audio des chaines YouTube de radiodiffuseurs
+marocains (2M, Medi1, SNRT, etc.) de maniere \emph{incrementale} : seuls les nouveaux
+episodes sont acquis lors des executions suivantes, sans re-telecharger l'existant.
+
+\textbf{Arborescence de sortie.}
+\begin{lstlisting}
+{compte}/{annee}/{mois}/{titre}.mp3
+\end{lstlisting}
+Exemple : \texttt{2m\_officiel/2026/07/journal\_20h\_01\_07\_2026.mp3}.
+Cette structure permet de retrouver rapidement tout le contenu d'un mois ou d'un compte
+sans base de donnees externe.
+
+\textbf{Moteur.} Le telechargement repose sur \textbf{yt-dlp}, invoque avec le format
+\texttt{bestaudio/best} et le post-processeur FFmpeg pour la re-encodage en MP3
+(192 kbit/s). yt-dlp est prefere a youtube-dl pour sa maintenance active et sa meilleure
+gestion des protections anti-bot recentes.
+
+\textbf{Archive de deduplication.} Un fichier d'archive yt-dlp (\texttt{--download-archive})
+est maintenu par compte. Il enregistre les identifiants des videos deja acquises ; les
+appels subsequents sautent automatiquement ces entrees, ce qui garantit l'idempotence
+meme si la liste de la chaine change.
+
+\textbf{Options notables.}
+\begin{description}[style=nextline, leftmargin=2.2em, labelindent=0.4em]
+  \item[\texttt{--scan-limit N}]
+    Limite le balayage aux \texttt{N} episodes les plus recents de la chaine (par defaut :
+    50). Utile pour les chaines tres actives ou seul le flux recent interesse.
+  \item[\texttt{--js-runtimes}]
+    Specifie les interpretes JavaScript disponibles (\texttt{nodejs}, \texttt{deno},
+    \texttt{phantomjs}…) passes a yt-dlp pour le rendu des pages protegees. Sans ce
+    parametre, yt-dlp choisit automatiquement le premier interprete disponible.
+  \item[\texttt{--dry-run}]
+    Mode simulation : affiche la liste des episodes qui seraient telecharges sans ecrire
+    aucun fichier. Pratique pour valider la configuration avant un vrai batch.
+  \item[\texttt{--log}]
+    Chemin vers un fichier de journal. Les evenements (nouveau telechargement, saut,
+    erreur reseau) y sont horodates ; l'absence de cette option redirige la sortie vers
+    \texttt{stdout}.
+\end{description}
+
+% ------------------------------------------------------------
+\subsection{Telechargeur Instagram — \texttt{fetch\_instagram.py}}
+% ------------------------------------------------------------
+
+\textbf{Objectif.} Recuperer l'audio des publications et reels Instagram de comptes de
+radiodiffuseurs, en suivant la meme arborescence normalisee que pour YouTube.
+
+\textbf{Authentification.} La bibliotheque \textbf{instaloader} est utilisee pour
+l'acces a l'API non officielle d'Instagram. La session est chargee depuis un fichier de
+cookies ou par identifiants, ce qui evite la re-authentification a chaque execution.
+
+\textbf{Gestion de session et double authentification (2FA).}
+Lorsqu'Instagram exige une verification en deux etapes, le script detecte la demande
+et invite l'utilisateur a saisir le code TOTP interactivement. La session resultante est
+serialisee sur disque (\texttt{--session-file}) pour etre reutilisee sans nouvelle
+authentification dans les 90 jours.
+
+\textbf{Extraction audio.} Les publications Instagram sont des videos ; l'audio est extrait
+avec \textbf{FFmpeg} en post-traitement, exactement comme pour YouTube, ce qui garantit
+un format MP3 uniforme en sortie.
+
+\textbf{Arborescence de sortie.}
+\begin{lstlisting}
+{compte}/{annee}/{mois}/{titre}.mp3
+\end{lstlisting}
+Le titre est derive de la date de publication et du shortcode Instagram
+(ex. \texttt{2m\_maroc/2026/07/2026-07-01\_CxY3z.mp3}) pour garantir l'unicite.
+
+\textbf{Deduplication.} Un registre JSON local (un fichier par compte) memorise les
+shortcodes deja traites. A chaque execution, seuls les nouveaux posts sont telecharges.
+
+% ------------------------------------------------------------
+\subsection{Module de fonctions partage — \texttt{\_media\_common.py}}
+% ------------------------------------------------------------
+
+Les deux scripts s'appuient sur un module interne \texttt{\_media\_common.py} qui
+centralise la logique reutilisable :
+
+\begin{itemize}
+  \item Construction et validation de l'arborescence de sortie
+    (\texttt{\{compte\}/\{annee\}/\{mois\}/}).
+  \item Normalisation des noms de fichiers (suppression des caracteres interdits,
+    troncature des titres longs, encodage UTF-8 coherent sous Linux et Windows).
+  \item Fonctions d'horodatage et de journalisation (format partage entre les deux scripts).
+  \item Gestion des tentatives avec repli exponentiel (\emph{exponential back-off}) pour
+    les erreurs reseau transitoires.
+  \item Utilitaires FFmpeg : detection du binaire, construction de la commande de
+    conversion, verification du fichier de sortie.
+\end{itemize}
+
+Ce module n'a pas d'entree CLI propre ; il est importe par \texttt{fetch\_youtube.py}
+et \texttt{fetch\_instagram.py}.
+
+% ------------------------------------------------------------
+\subsection{Suite de tests}
+% ------------------------------------------------------------
+
+Les trois modules (\texttt{fetch\_youtube.py}, \texttt{fetch\_instagram.py} et
+\texttt{\_media\_common.py}) sont couverts par une suite de \textbf{178 tests} executes
+avec \textbf{pytest}. Les tests utilisent des bouchons (\emph{mocks}) pour yt-dlp,
+instaloader et FFmpeg afin de rester reproductibles sans connexion reseau ni media reels.
+Les cas couverts incluent la construction de l'arborescence, la deduplication, la gestion
+des erreurs reseau, la re-authentification 2FA et les modes \texttt{--dry-run}.
+
+\vspace{4pt}
+\rule{\linewidth}{0.4pt}\\[2pt]
+{\footnotesize\itshape Sources : \texttt{ingestion/fetch\_youtube.py},
+\texttt{ingestion/fetch\_instagram.py}, \texttt{ingestion/\_media\_common.py},
+\texttt{tests/} (suite pytest, 178 tests).}
+
+\end{document}
