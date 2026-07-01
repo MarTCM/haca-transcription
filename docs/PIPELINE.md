@@ -608,3 +608,89 @@ recommended for all workflows.
 Yes. `--model` accepts any local path to a faster-whisper CTranslate2 model
 directory, or a HuggingFace model ID that faster-whisper can resolve. Same for
 `--lora-model` and `--lora-base`.
+
+---
+
+## Media Ingestion Pipeline (fetch_youtube / fetch_instagram)
+
+Before the transcription pipeline can run, raw audio must be obtained from the
+broadcast sources. Two tools in `tools/` handle this ingestion stage, sitting
+*in front of* the transcription pipeline described above.
+
+### Overview
+
+```
+YouTube channel  ──► fetch_youtube.py  ──► youtube/{channel}/{YYYY}/{MM}/{title}.mp3
+                                                │
+Instagram account ──► fetch_instagram.py ──► instagram/{account}/{YYYY}/{MM}/{title}.mp3
+                                                │
+                                                ▼
+                                  organize_medias.py (optional)
+                                                │
+                                                ▼
+                            medias/{channel}/{year}/{month}/{day}/{stamp}.mp3
+                                                │
+                                                ▼
+                                    cli.py → transcription pipeline
+```
+
+### `tools/fetch_youtube.py`
+
+Downloads the audio of every new video from a YouTube channel, incrementally.
+Uses **yt-dlp** (Python API) for channel listing and download, with
+`FFmpegExtractAudio` for audio extraction. On-disk layout:
+
+```
+youtube/{channel}/{YYYY}/{MM}/{video_title}.{ext}
+```
+
+Each run only downloads videos not already in the download archive
+(`youtube/.download-archive.txt`). A filesystem safety net backfills the archive
+from existing files, so the archive self-heals if deleted or if files are copied
+in by hand. The `--scan-limit` (default 50) bounds how many of the newest
+uploads are examined per run, keeping large channels fast. Dry-run, `--since`,
+and `--max-downloads` flags give fine-grained control.
+
+### `tools/fetch_instagram.py`
+
+Downloads the audio of every new video post and reel from one or more Instagram
+accounts. Uses **instaloader** for profile iteration and video download, and
+**ffmpeg** for audio extraction from staged video files. On-disk layout:
+
+```
+instagram/{account}/{YYYY}/{MM}/{caption_title}.{ext}
+```
+
+Requires a one-time interactive login (`--login`) to save a session file; all
+subsequent runs load the session silently. The same incremental deduplication
+strategy (download archive + on-disk safety net), `--scan-limit`, `--since`,
+`--max-downloads`, and dry-run support are identical to the YouTube tool.
+
+### Shared foundation: `tools/_media_common.py`
+
+Both tools import from **`tools/_media_common.py`**, which provides:
+
+- `slugify_channel` / `sanitize_filename` — filesystem-safe name helpers
+  (illegal characters stripped, whitespace collapsed, non-Latin letters and emoji
+  preserved, length-capped)
+- `stamp_from_datetime` — formats any datetime as a 14-digit UTC
+  `YYYYMMDDHHMMSS` stamp (aware datetimes converted to UTC; naive ones assumed
+  UTC)
+- `dest_for` — shared path builder: `{out}/{account}/{YYYY}/{MM}/{title}.{ext}`
+- `load_archive` / `append_archive` — archive I/O (set for O(1) membership;
+  append-mode writes are crash-safe)
+- `make_logger` — tee logger: prints to stdout and optionally appends timestamped
+  lines to a log file
+
+This shared module guarantees both tools produce byte-identical on-disk layouts
+and stamp filenames the same way, so downstream tooling (`organize_medias.py`,
+`cli.py`) can treat YouTube and Instagram audio identically.
+
+### Further reading
+
+- [`docs/YOUTUBE_DOWNLOADER.md`](YOUTUBE_DOWNLOADER.md) — full architecture,
+  library choices, design decisions, and a line-by-line walkthrough of
+  `fetch_youtube.py`.
+- [`docs/INSTAGRAM_DOWNLOADER.md`](INSTAGRAM_DOWNLOADER.md) — full architecture,
+  authentication design, and a line-by-line walkthrough of `fetch_instagram.py`
+  and `_media_common.py`.

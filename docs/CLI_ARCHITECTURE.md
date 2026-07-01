@@ -632,3 +632,189 @@ docker load < haca-transcribe-gpu.tar.gz
 
 To use the Docker Hub image with `docker-compose.yml`, replace the `build:` block
 with `image: <DOCKERHUB_USER>/haca-transcribe:gpu`.
+
+---
+
+## 12. Media Ingestion Tools
+
+The three scripts below sit *in front of* the transcription pipeline: they pull
+raw audio off remote platforms and write it into a local tree that the CLI (§6)
+can then transcribe. They live in `transcription/tools/` and share a single
+dependency-free helper module.
+
+```
+YouTube / Instagram ──► fetch_youtube.py / fetch_instagram.py
+                                  │  both import
+                                  ▼
+                          tools/_media_common.py   (pure, no third-party deps)
+                                  │
+                     output tree: {platform}/{account}/{year}/{month}/{title}.{ext}
+                                  │
+                                  ▼
+                          transcription/cli.py  (existing pipeline)
+```
+
+### 12.1 Shared helpers (`_media_common.py`)
+
+`tools/_media_common.py` is a **pure, dependency-free** module that both
+downloaders import. It has no network calls and no third-party imports, so it can
+be imported safely in tests without any platform library installed.
+
+What it provides:
+
+| Symbol | Purpose |
+|--------|---------|
+| `DEFAULT_SCAN_LIMIT` | Default per-account/channel scan window (50). |
+| `slugify_channel(title)` | Turn a channel/account title into one safe path segment. Strips filesystem-illegal characters, collapses whitespace, trims trailing dots/spaces (Windows restriction). Non-Latin letters and emoji are preserved. |
+| `sanitize_filename(name, max_len=150)` | Same rules as `slugify_channel`, plus a length cap so filenames stay well under the 255-byte filesystem limit. Used for the file stem. |
+| `stamp_from_datetime(d)` | Format any `datetime` as a 14-digit `YYYYMMDDHHMMSS` stamp in UTC. Aware datetimes are converted to UTC; naive datetimes are assumed UTC (instaloader's `date_utc` convention). |
+| `dest_for(out_root, account, stamp, title, ext)` | Shared path builder: `out/{account}/{YYYY}/{MM}/{title}.{ext}`. Both tools call this, guaranteeing byte-identical layouts. |
+| `load_archive(path) -> set` | Read a yt-dlp-style download archive into an O(1) membership set. Missing file → empty set. |
+| `append_archive(path, key)` | Append one key line (crash-safe append mode, creates parents). |
+| `make_logger(log_path) -> (emit, close)` | Tee logger: `emit(msg)` prints to stdout and, when `--log` is given, appends a timestamped copy to a file. `close()` is a no-op without a file. |
+
+Both `fetch_youtube.py` and `fetch_instagram.py` were written (and tested) against
+this shared surface; the `_media_common.py` unit tests (`test_media_common.py`)
+cover every function independently.
+
+### 12.2 YouTube downloader (`fetch_youtube.py`)
+
+> **Full reference:** [`YOUTUBE_DOWNLOADER.md`](YOUTUBE_DOWNLOADER.md)
+
+#### Architecture summary
+
+The module is split into two halves:
+
+- **Pure core** — `stamp_from_info`, `dest_path`, `normalize_channel_url`,
+  `archive_key`, `entry_url`, `parse_js_runtimes`, `build_ydl_opts` — no network,
+  deterministic, fully unit-tested.
+- **Orchestration / I/O** — `list_entries`, `fetch_info`, `download_audio`,
+  `download_new`, `main` — talk to yt-dlp via an injectable `ydl_factory` so
+  the entire loop is testable without a network connection or ffmpeg.
+
+Processing is **two-phase**: `list_entries` (Phase 1) uses yt-dlp's
+`extract_flat` to get video ids cheaply and in a bounded window
+(`playlistend = scan_limit`); `fetch_info` (Phase 2) is only called for videos
+that survive the archive check, to fetch the precise upload timestamp and channel
+title needed to build the output path.
+
+#### Key flags
+
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--url` | required | YouTube channel URL (all four URL shapes accepted) |
+| `--out` | `./youtube` | Output root |
+| `--audio-format` | `mp3` | Codec to extract (mp3, m4a, opus, …) |
+| `--max-downloads` | none | Cap downloads this run |
+| `--scan-limit` | 50 | How many of the newest uploads to examine; 0 = all |
+| `--since` | none | Only download videos uploaded on/after `YYYYMMDD` |
+| `--dry-run` | off | List what would be downloaded, touch nothing |
+| `--js-runtimes` | yt-dlp default (deno) | JS runtime for YouTube extraction (`RUNTIME[:PATH]`, repeatable) |
+| `--log` | none | Also tee timestamped output to this file |
+
+#### Output layout
+
+```
+youtube/{channel_title}/{year}/{month}/{video_title}.mp3
+youtube/.download-archive.txt          # dedup source of truth
+```
+
+`{channel_title}` is derived from the video's `channel` metadata field
+(sanitized via `slugify_channel`); `{year}/{month}` from the upload date; the
+filename is the sanitized video title, falling back to the 14-digit
+`YYYYMMDDHHMMSS` stamp if there is no title.
+
+#### Deduplication
+
+Two independent mechanisms:
+1. **Download archive** (`youtube/.download-archive.txt`) — one line per video in
+   yt-dlp's own `youtube <videoid>` format. Checked first (Phase 1), so skips are
+   fast and make repeat runs cheap.
+2. **Filesystem safety net** — if the archive is missing or incomplete but the
+   destination file already exists, the archive is backfilled automatically and
+   the video is skipped. The archive self-heals.
+
+#### Integration with the transcription pipeline
+
+The YouTube downloader outputs audio files whose structure mirrors the
+`medias/{channel}/{year}/{month}/` tree that `cli.py` expects. After a download
+run the files can be transcribed directly:
+
+```bash
+python transcription/cli.py --medias youtube/ --channel "Some Channel" --year 2026
+```
+
+Alternatively, `tools/organize_medias.py` can reshuffled a flat tree or rename
+files to the required `YYYYMMDDHHMMSS` stamp format if the output path already
+exists in the target `medias/` tree.
+
+### 12.3 Instagram downloader (`fetch_instagram.py`)
+
+> **Full reference:** [`INSTAGRAM_DOWNLOADER.md`](INSTAGRAM_DOWNLOADER.md)
+
+#### Architecture summary
+
+Same two-halves pattern as the YouTube tool:
+
+- **Pure core** — `caption_title`, `stamp_from_post`, `archive_key`,
+  `instagram_dest_path`, `ffmpeg_extract_cmd`, `InstaConfig`, `RunStats` — no
+  network, fully unit-tested.
+- **Orchestration / I/O** — `make_loader`, `load_or_login`,
+  `_default_posts_provider`, `stage_download`, `extract_audio`,
+  `download_account`, `download_all`, `main` — injectable (`posts_provider`,
+  `extract`, `loader`) so the loop is testable without instaloader, network, or
+  ffmpeg.
+
+Download is **hybrid staging → ffmpeg**: instaloader downloads the video into
+`instagram/.staging/`; ffmpeg then extracts the audio into the final tree. Only
+`.mp4` files are staged; thumbnails, metadata JSON and caption sidecar txt files
+are disabled in `make_loader`.
+
+#### Session authentication
+
+Instagram blocks almost everything anonymously. Authentication is handled through
+`load_or_login`:
+
+1. **First run:** `--user <login> --login` — prompts for password (via `getpass`,
+   never logged), handles 2FA if Instagram requests it
+   (`TwoFactorAuthRequiredException`), then saves the session file.
+2. **Subsequent runs:** the session file is loaded silently; no prompts. A missing
+   file exits with a clear message: *"Run once with `--login` first."*
+
+Session files live at `instagram/.sessions/<user>.session` (override with
+`--session-file`). The `instagram/` directory is gitignored.
+
+#### Key flags
+
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--account` | required | Instagram username to download (repeatable) |
+| `--user` | required | Your Instagram login username |
+| `--login` | off | Log in interactively and save the session |
+| `--session-file` | `<out>/.sessions/<user>.session` | Override session path |
+| `--out` | `./instagram` | Output root |
+| `--audio-format` | `mp3` | Codec to extract |
+| `--max-downloads` | none | Cap downloads per account this run |
+| `--scan-limit` | 50 | How many of each account's newest posts to examine; 0 = all |
+| `--since` | none | Only download posts uploaded on/after `YYYYMMDD` |
+| `--dry-run` | off | List what would be downloaded, touch nothing |
+| `--log` | none | Also tee timestamped output to this file |
+
+#### Output layout
+
+```
+instagram/{account}/{year}/{month}/{caption_title}.mp3
+instagram/.download-archive.txt       # dedup source of truth
+instagram/.staging/                   # temporary staging dir (auto-cleaned)
+instagram/.sessions/<user>.session    # saved login credential
+```
+
+The filename is the sanitized first line of the post's caption, falling back to
+the post shortcode. The layout is identical to the YouTube tool's so downstream
+transcription treats both sources the same way.
+
+#### Multi-account support
+
+`--account` is repeatable; `download_all` runs `download_account` for each one in
+sequence. A failure on one account (private, not found, rate-limited) is isolated
+— the rest still run — and errors are aggregated into the combined summary.

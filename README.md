@@ -104,6 +104,79 @@ Building needs no GPU (only runtime does). See the "Running with Docker (GPU)"
 section of [`docs/CLI_ARCHITECTURE.md`](docs/CLI_ARCHITECTURE.md) for building,
 pushing to Docker Hub, and running on a remote GPU box.
 
+## Media Ingestion Tools
+
+Three tools in `tools/` handle the ingestion stage that sits *in front of*
+transcription — pulling raw audio off YouTube channels and Instagram accounts
+before the transcription pipeline processes it.
+
+All three tools share a common helpers module, **`tools/_media_common.py`**,
+which provides the filename sanitisation, UTC timestamp formatting, archive I/O,
+shared path builder, and the tee logger used by both downloaders. This keeps the
+two downloaders consistent: they produce byte-identical on-disk layouts and stamp
+filenames the same way.
+
+### `tools/fetch_youtube.py` — YouTube incremental audio downloader
+
+Downloads the audio of every new video from a YouTube channel, incrementally:
+
+```
+{out}/{channel}/{year}/{month}/{video_title}.{ext}   # default out: youtube/
+```
+
+Only videos not yet in the download archive are fetched. Re-runs are cheap —
+new videos are the only ones processed. A filesystem safety net (on-disk check
+with archive backfill) keeps the archive consistent even if it is deleted or
+files are copied in by hand.
+
+```bash
+# New videos since last run
+python tools/fetch_youtube.py --url https://www.youtube.com/@SomeChannel
+
+# Bound a large first run; preview with dry-run
+python tools/fetch_youtube.py --url https://www.youtube.com/@SomeChannel \
+    --max-downloads 5 --since 20260101 --dry-run
+```
+
+See [`docs/YOUTUBE_DOWNLOADER.md`](docs/YOUTUBE_DOWNLOADER.md) for the full
+architecture, library choices, and a line-by-line code walkthrough.
+
+### `tools/fetch_instagram.py` — Instagram incremental audio downloader
+
+Downloads the audio of every new video post and reel from one or more Instagram
+accounts. Uses the same on-disk layout and deduplication strategy as the YouTube
+tool:
+
+```
+{out}/{account}/{year}/{month}/{caption_title}.{ext}   # default out: instagram/
+```
+
+Requires a one-time interactive login (`--login`) to save a session; subsequent
+runs load the session silently. instaloader handles rate-limit backoff; ffmpeg
+extracts audio from the staged video files.
+
+```bash
+# One-time login
+python tools/fetch_instagram.py --user YOUR_LOGIN --login
+
+# Fetch new videos from one or more accounts
+python tools/fetch_instagram.py --user YOUR_LOGIN \
+    --account natgeo --account 2m.ma
+
+# Dry-run preview
+python tools/fetch_instagram.py --user YOUR_LOGIN --account natgeo --dry-run
+```
+
+See [`docs/INSTAGRAM_DOWNLOADER.md`](docs/INSTAGRAM_DOWNLOADER.md) for the full
+architecture, authentication design, and a line-by-line code walkthrough.
+
+### `tools/organize_medias.py` — media tree organiser
+
+Reshuffles a flat or loosely-structured media directory into the canonical
+`medias/{channel}/{year}/{month}/{day}/{YYYYMMDDHHMMSS}.{ext}` tree consumed by
+the transcription CLI (`cli.py`). Run this on audio downloaded by the two tools
+above to prepare it for batch transcription.
+
 ## Recommended workflow
 
 The heaviest, highest-quality runs are meant for a **Kaggle/Colab GPU (T4)** — see
@@ -113,11 +186,17 @@ smoke-testing the plumbing, not for quality.
 ## Tests
 
 ```bash
-pytest tests/        # SRT-writer + core (config/selection/runner) + CLI tests
+pytest tests/        # SRT-writer + core (config/selection/runner) + CLI + media ingestion tests
 ```
 
 The `core/` and `cli.py` tests run without a GPU, a model download, or
 faster-whisper installed — they use injected fakes for the transcription call.
+
+The media ingestion tests (`test_media_common.py`, `test_fetch_youtube.py`,
+`test_fetch_instagram.py`) run without a network connection, yt-dlp, instaloader,
+or ffmpeg — they use injected fakes for all I/O.
+
+**178 tests passing** in total across all test files.
 
 ## Layout
 
@@ -127,14 +206,29 @@ core/                          shared logic (config, selection, runner, summary)
 src/transcribe.py              pipeline + CLI (decode → VAD → chunk → detect → transcribe → write)
 src/transcribe_whisperx.py     alternate pipeline (WhisperX + alignment + diarization)
 src/srt_writer.py              standard .srt writer
+tools/_media_common.py         shared helpers for both media downloaders (filenames, stamps, archive, logger)
+tools/fetch_youtube.py         YouTube incremental audio downloader (yt-dlp)
+tools/fetch_instagram.py       Instagram incremental audio downloader (instaloader + ffmpeg)
+tools/organize_medias.py       reshuffles a media tree into the canonical YYYYMMDDHHMMSS layout
+tools/requirements-youtube.txt pip requirements for fetch_youtube.py
+tools/requirements-instagram.txt pip requirements for fetch_instagram.py
 Dockerfile.gpu                 GPU image for the batch CLI
 docker-compose.yml             convenience wrapper for repeated GPU runs
 docs/CLI_ARCHITECTURE.md       batch CLI architecture, code walkthrough, Docker guide
+docs/INSTAGRAM_DOWNLOADER.md   Instagram downloader architecture and code walkthrough
 docs/PIPELINE.md               comprehensive reference (start here)
 docs/TRANSCRIPTION.md          design notes (why faster-whisper, the Darija reality)
 docs/WHISPERX_GUIDE.md         WhisperX code walkthrough (deep-dive supplement)
+docs/YOUTUBE_DOWNLOADER.md     YouTube downloader architecture and code walkthrough
 notebooks/                     Kaggle GPU runners
-tests/                         SRT-writer + core + CLI unit tests
+tests/test_srt_writer.py       SRT writer tests
+tests/test_config.py           core config tests
+tests/test_selection.py        core selection tests
+tests/test_runner.py           core runner tests
+tests/test_cli.py              CLI tests
+tests/test_media_common.py     shared media helpers tests
+tests/test_fetch_youtube.py    YouTube downloader tests (42 tests, FakeYDL)
+tests/test_fetch_instagram.py  Instagram downloader tests (41 tests, FakeLoader)
 ```
 
 ## License & limitations

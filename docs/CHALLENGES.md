@@ -152,3 +152,153 @@ pin the image's torch stack to 2.8.0 on cu126/cu128 the same way the native docs
 - **Run it where it's designed to run.** Most of the field pain (CPU torch, FFmpeg DLLs,
   Python-version wheels) is Windows-specific; the GPU Docker image or a Linux GPU box
   avoids it and is far faster.
+
+---
+
+## 6. Media Ingestion Challenges
+
+Challenges hit while building the YouTube and Instagram incremental audio
+downloaders (`tools/fetch_youtube.py` and `tools/fetch_instagram.py`). The
+companion architecture docs are [`YOUTUBE_DOWNLOADER.md`](YOUTUBE_DOWNLOADER.md)
+and [`INSTAGRAM_DOWNLOADER.md`](INSTAGRAM_DOWNLOADER.md).
+
+### 6.1 YouTube channel listing hangs on large channels
+
+**Symptom.** On a channel with tens of thousands of uploads (e.g. a TV network
+archive), `yt-dlp.extract_info(channel_url, extract_flat="in_playlist")` pages
+through the *entire* upload history before returning. This can take many minutes
+and looks indistinguishable from a hung process — no output, no progress, no
+error.
+
+**Root cause.** yt-dlp's flat extractor lazily pages through a playlist; when you
+iterate `info["entries"]` (a generator) Python forces all pages before returning
+the full list. The `--max-downloads` cap that was intended to bound the work
+never gets a chance to apply because the listing step happens before the
+per-video loop.
+
+**Fix — `playlistend` + `scan_limit`.** The `FetchConfig.listing_end()` method
+returns `max(scan_limit, max_downloads)` (defaulting `scan_limit` to 50) and
+passes it to yt-dlp as `opts["playlistend"]`. yt-dlp stops paging early once it
+has fetched that many entries, so the listing step is bounded regardless of
+channel size. `scan_limit=0` disables the cap for users who explicitly want the
+full history. The tool also prints `"listing uploads (scanning N most recent)…"`
+then `"examining N upload(s)"` so users can see it working and know it hasn't
+hung.
+
+### 6.2 yt-dlp JS runtime detection failure (the "two denos" trap)
+
+**Symptom.** After installing deno and yt-dlp-ejs, yt-dlp still warns:
+
+```
+WARNING: [youtube] No supported JavaScript runtime could be found. ...
+```
+
+and some formats or metadata may be missing or stale.
+
+**Root cause — yt-dlp probes the first `deno` on `PATH`**, not necessarily the
+one just installed. A broken system-installed deno (a common culprit is a distro
+`/usr/bin/deno` built against a mismatched `sqlite3` library) crashes immediately:
+
+```
+/usr/bin/deno: symbol lookup error: /usr/bin/deno: undefined symbol: sqlite3...
+```
+
+yt-dlp detects the non-zero exit and concludes no working runtime exists, even
+though a good deno is installed elsewhere (e.g. `~/.deno/bin/deno`).
+
+**Two-part fix:**
+
+1. **`yt-dlp-ejs` Python package** (already listed in
+   `requirements-youtube.txt`): ships the challenge-solver script and works
+   offline so no `--remote-components` flag is needed.
+   ```bash
+   pip install yt-dlp-ejs
+   ```
+2. **Put the good runtime first on `PATH`** (or point directly at it):
+   ```bash
+   # preferred — fix it globally
+   export PATH="$HOME/.deno/bin:$PATH"    # add to ~/.bashrc
+
+   # or — tell this tool specifically
+   python tools/fetch_youtube.py --url <CHANNEL> --js-runtimes deno:$HOME/.deno/bin/deno
+   ```
+
+**Diagnosis commands:**
+```bash
+command -v deno     # which deno wins on PATH?
+deno --version      # does THAT one actually run? (must exit 0 with a version)
+```
+
+If the winning `deno --version` crashes rather than printing a version, it is the
+broken one. Remove it, fix its `PATH` position, or use `--js-runtimes` to bypass
+detection entirely.
+
+### 6.3 Instagram authentication and rate-limiting
+
+**Authentication challenge.** Instagram blocks or severely rate-limits almost all
+unauthenticated requests. Attempting to list a public profile's posts without a
+session returns empty results or raises an exception immediately.
+
+**Session file approach.** The tool wraps instaloader's session management in
+`load_or_login`:
+
+- `--login` performs an interactive login (password via `getpass.getpass`, never
+  echoed or logged), handles 2FA automatically if Instagram raises
+  `TwoFactorAuthRequiredException`, and saves the session to
+  `instagram/.sessions/<user>.session`.
+- Subsequent runs load the session silently; no credentials are requested. A
+  missing session file produces a clear error: *"Run once with `--login` first."*
+- `--session-file` overrides the default path if needed.
+
+**2FA handling.** The `two_factor_exc` and `twofa_prompt` arguments to
+`load_or_login` are injected from `main`, where the real
+`TwoFactorAuthRequiredException` is known. This means the pure auth logic is
+testable in isolation (passing a fake exception class and a lambda that returns a
+canned code) without any real Instagram interaction.
+
+**Rate-limit awareness.** Instagram imposes aggressive rate limits on automated
+clients; excessive requests can result in temporary account blocks. Mitigations:
+
+- `--scan-limit` (default 50) bounds how many posts are examined per account per
+  run, limiting the number of API calls even on large profiles.
+- `--since` filters by upload date so old posts are not re-examined.
+- Keep scheduled runs infrequent (e.g. daily, not hourly).
+- Use a dedicated login account that does not follow a personal account's contact
+  graph.
+- instaloader applies its own automatic rate-limit back-off; the tool does not
+  bypass or disable it.
+
+The session file is a **credential** and the `instagram/` directory is
+gitignored to prevent accidental commits.
+
+### 6.4 Per-platform dedup strategy (archive + on-disk check)
+
+**Problem.** A naive "check the archive, skip if seen" strategy has two failure
+modes:
+
+1. **Archive lost or incomplete.** If the archive file is deleted, moved, or was
+   never created (e.g. files were copied in manually or from another machine), the
+   tool re-downloads everything from scratch — potentially hours of work.
+2. **Archive inconsistent with disk.** If a download succeeded but the archive
+   write was interrupted (process killed, disk full), the archive says "not seen"
+   but the file is already there.
+
+**Solution — two independent mechanisms, working together:**
+
+1. **Download archive** (`{platform}/.download-archive.txt`) — the **source of
+   truth**. One line per downloaded item in the format `<platform> <id>` (e.g.
+   `youtube dQw4w9WgXcQ`, `instagram CxYzAbcDef1`). Checked first (cheaply, in
+   memory from a `set`). Written atomically via append after a successful
+   download. Format matches yt-dlp's own `--download-archive` so the file is
+   interchangeable with yt-dlp's own tooling.
+
+2. **Filesystem safety net** — before downloading, check whether the destination
+   file already exists on disk. If it does but the archive didn't know about it,
+   **backfill** the archive entry and skip. This makes the archive **self-healing**:
+   re-run after losing the archive and it rebuilds itself from the files on disk
+   as they are encountered, without re-downloading any of them.
+
+Both tools implement this pattern identically through the shared
+`_media_common.load_archive` / `_media_common.append_archive` helpers, and
+the tests (`test_download_new_backfills_when_file_exists`,
+`test_download_account_on_disk_check`) verify the backfill behaviour is correct.
