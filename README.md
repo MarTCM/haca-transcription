@@ -170,6 +170,39 @@ python tools/fetch_instagram.py --user YOUR_LOGIN --account natgeo --dry-run
 See [`docs/INSTAGRAM_DOWNLOADER.md`](docs/INSTAGRAM_DOWNLOADER.md) for the full
 architecture, authentication design, and a line-by-line code walkthrough.
 
+### `tools/fetch_tiktok.py` — TikTok incremental audio downloader
+
+Downloads the audio of every new video from one or more TikTok accounts,
+incrementally. Uses the same **yt-dlp** engine as `fetch_youtube.py` — no JS
+runtime or `yt-dlp-ejs` package required. Single-phase listing: yt-dlp's flat
+entry already contains `timestamp`, `title`, and `uploader`, so no per-video
+metadata call is needed. Same on-disk layout and deduplication strategy as the
+YouTube and Instagram tools:
+
+```
+{out}/{account}/{year}/{month}/{title}.{ext}   # default out: tiktok/
+```
+
+No login is required for **public** accounts. Private or geo-restricted accounts
+can be reached by passing `--cookies-file` (a Netscape-format cookies file
+exported from a browser).
+
+```bash
+# New videos from one account since last run
+python tools/fetch_tiktok.py --account @2mmaroc
+
+# Multiple accounts, bounded first run
+python tools/fetch_tiktok.py --account @2mmaroc --account @medi1tv \
+    --max-downloads 10 --since 20260101 --dry-run
+
+# Private account via cookies
+python tools/fetch_tiktok.py --account @privatechannel \
+    --cookies-file ~/tiktok-cookies.txt
+```
+
+See [`docs/TIKTOK_DOWNLOADER.md`](docs/TIKTOK_DOWNLOADER.md) for the full
+architecture, library choices, and a line-by-line code walkthrough.
+
 ### `tools/organize_medias.py` — media tree organiser
 
 Reshuffles a flat or loosely-structured media directory into the canonical
@@ -196,7 +229,7 @@ The media ingestion tests (`test_media_common.py`, `test_fetch_youtube.py`,
 `test_fetch_instagram.py`) run without a network connection, yt-dlp, instaloader,
 or ffmpeg — they use injected fakes for all I/O.
 
-**178 tests passing** in total across all test files.
+**216 tests passing** in total across all test files.
 
 ## Layout
 
@@ -209,9 +242,11 @@ src/srt_writer.py              standard .srt writer
 tools/_media_common.py         shared helpers for both media downloaders (filenames, stamps, archive, logger)
 tools/fetch_youtube.py         YouTube incremental audio downloader (yt-dlp)
 tools/fetch_instagram.py       Instagram incremental audio downloader (instaloader + ffmpeg)
+tools/fetch_tiktok.py          TikTok incremental audio downloader (yt-dlp, single-phase)
 tools/organize_medias.py       reshuffles a media tree into the canonical YYYYMMDDHHMMSS layout
 tools/requirements-youtube.txt pip requirements for fetch_youtube.py
 tools/requirements-instagram.txt pip requirements for fetch_instagram.py
+tools/requirements-tiktok.txt  pip requirements for fetch_tiktok.py
 Dockerfile.gpu                 GPU image for the batch CLI
 docker-compose.yml             convenience wrapper for repeated GPU runs
 docs/CLI_ARCHITECTURE.md       batch CLI architecture, code walkthrough, Docker guide

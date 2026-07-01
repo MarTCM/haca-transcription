@@ -818,3 +818,50 @@ transcription treats both sources the same way.
 `--account` is repeatable; `download_all` runs `download_account` for each one in
 sequence. A failure on one account (private, not found, rate-limited) is isolated
 — the rest still run — and errors are aggregated into the combined summary.
+
+### 12.4 TikTok downloader (`fetch_tiktok.py`)
+
+> **Full reference:** [`TIKTOK_DOWNLOADER.md`](TIKTOK_DOWNLOADER.md)
+
+#### Architecture summary
+
+Same yt-dlp engine as the YouTube tool, with two key simplifications:
+
+- **Single-phase listing** — TikTok's yt-dlp flat extractor already includes
+  `timestamp`, `title`, and `uploader` in each entry, so no per-video
+  `extract_info` call is needed. Each unseen video costs exactly one yt-dlp call
+  (the download), not two.
+- **No JS runtime** — TikTok extraction does not use the EJS challenge system.
+  No deno, no `yt-dlp-ejs`, no `--js-runtimes` flag.
+
+Additional specifics:
+- `normalize_handle(raw)` strips `@` and lowercases the handle before use.
+- `account_url(handle)` builds `https://www.tiktok.com/@{handle}`.
+- `entry_url(entry)` constructs `/@{uploader}/video/{id}` — TikTok watch URLs
+  require both the uploader and the video id (unlike YouTube's `?v=`).
+- **Private / geo-restricted accounts:** `--cookies-file` passes a Netscape-format
+  cookies file to yt-dlp (`cookiefile` option) for both listing and downloading.
+
+#### CLI flags
+
+| Flag | Default | Meaning |
+|------|---------|---------| 
+| `--account` | required | TikTok handle (with or without @, repeatable) |
+| `--out` | `./tiktok` | Output root |
+| `--audio-format` | `mp3` | Codec to extract |
+| `--max-downloads` | none | Cap downloads per account this run |
+| `--scan-limit` | 50 | How many of each account's newest videos to examine; 0 = all |
+| `--since` | none | Only download videos uploaded on/after `YYYYMMDD` |
+| `--dry-run` | off | List what would be downloaded, touch nothing |
+| `--cookies-file` | none | Netscape cookies file for private/geo-restricted accounts |
+| `--log` | none | Also tee timestamped output to this file |
+
+#### Output layout
+
+```
+tiktok/{handle}/{year}/{month}/{video_title}.mp3
+tiktok/.download-archive.txt       # dedup source of truth (keys: 'tiktok <id>')
+```
+
+The handle is the normalised (no `@`, lowercased) TikTok username. The filename
+is the sanitized video description, falling back to the `YYYYMMDDHHMMSS` stamp.

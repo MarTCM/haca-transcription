@@ -1774,7 +1774,111 @@ of the post iterator once \code{end} posts have been examined.
 \label{tab:ig-flags}
 \end{table}
 
-% --- Section 5: Tests ---
+% --- Section 5: TikTok downloader ---
+\section{Téléchargeur TikTok (\texttt{fetch\_tiktok.py})}
+
+\subsection{Dépendances et absence de moteur JavaScript}
+
+\texttt{fetch\_tiktok.py} uses the same \textbf{yt-dlp Python API}
+(\code{from yt\_dlp import YoutubeDL}) as \texttt{fetch\_youtube.py}.
+Unlike the YouTube extractor, which requires a JavaScript runtime (Deno or Node,
+via \code{yt-dlp-ejs}) to resolve certain playback challenges, \textbf{TikTok
+extraction needs no JS runtime}: yt-dlp resolves TikTok URLs entirely in Python.
+There is therefore no need to install \code{yt-dlp-ejs}, configure a \code{--js-runtimes}
+override, or have Deno on \code{PATH} to use this tool. The only non-standard
+dependency for audio re-encoding remains \textbf{ffmpeg} on \code{PATH}.
+
+\subsection{Single-phase listing strategy}
+
+The YouTube tool requires two yt-dlp calls per video: a lightweight flat listing
+followed by a per-video metadata fetch.  TikTok's API behaves differently: each
+entry returned by a \textbf{flat playlist extract}
+(\code{extract\_flat="in\_playlist"}) already contains the \textbf{upload
+timestamp, the video title, and the uploader handle}.  No Phase-2 per-video call
+is needed.  This means:
+
+\begin{itemize}[leftmargin=1.6em]
+  \item Archive and date-bound filters are applied directly to the flat entries,
+        with zero additional network round-trips.
+  \item The full output path --- including the \code{year/month} directory and the
+        sanitised title --- is computed from the flat entry before any audio is
+        fetched.
+  \item On large accounts or incremental daily runs, listing is substantially
+        faster than the two-phase YouTube approach.
+\end{itemize}
+
+The number of entries examined is bounded by
+\code{playlistend = scan\_limit} (default 50), following the same
+\code{FetchConfig.listing\_end()} convention as the YouTube tool.
+
+\subsection{Deduplication}
+
+Two independent deduplication layers mirror those of the other ingestion tools:
+
+\begin{description}[leftmargin=2em,style=nextline]
+  \item[Download archive] A plain-text file \code{.download-archive.txt} at the
+        output root stores one \code{"tiktok <id>"} line per downloaded clip.
+        Loaded into memory at the start of each run, it allows any already-seen
+        entry to be skipped before the audio download begins.
+  \item[Filesystem check] If the target \code{.mp3} already exists but the
+        archive entry is absent (e.g.\ after an accidental archive deletion), the
+        tool backfills the archive with that id and skips the clip, preventing any
+        re-download.
+\end{description}
+
+The archive format (\code{"tiktok <id>"}) is intentionally compatible with
+yt-dlp's own \code{--download-archive} convention so the file can be merged with
+archives from other tools or inspected with standard text utilities.
+
+\subsection{\texttt{--cookies-file} for private accounts}
+
+Public TikTok accounts are accessible without authentication.  For \textbf{private
+accounts}, the \code{--cookies-file} flag accepts a Netscape-format cookie file
+(exportable from any browser) and passes it directly to yt-dlp, which uses it to
+authenticate requests.  No password is stored in plain text; the cookie file is
+the sole credential.
+
+\subsection{Output layout}
+
+Downloaded audio files land at:
+\begin{lstlisting}[style=sh, numbers=none]
+{out}/{handle}/{year}/{month}/{title}.mp3
+# e.g. tiktok/2m.ma/2026/06/journal-du-soir.mp3
+\end{lstlisting}
+where \code{handle} is \code{slugify\_channel(entry["uploader"])} and
+\code{title} is \code{sanitize\_filename(entry["title"])}, both delegated to the
+shared \code{\_media\_common} helpers.  Year and month are derived from the
+entry's upload timestamp, not the download date.  The \code{--out} directory
+defaults to \code{./tiktok}; pointing it at the transcription pipeline's
+\code{medias/} root makes the tools interoperable without any manual copying.
+
+\subsection{CLI flags}
+
+\begin{table}[ht]
+\centering
+\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Flag} & \textbf{Default} & \textbf{Meaning} \\
+\midrule
+\code{--account} & \emph{required} & TikTok handle to download. Repeatable for multiple accounts
+                                      (e.g.\ \code{--account 2m --account medi1}). \\
+\code{--out} & \code{./tiktok} & Output root directory. \\
+\code{--audio-format} & \code{mp3} & Audio codec: \code{mp3}, \code{m4a}, \code{opus}, \ldots \\
+\code{--scan-limit} & \code{50} & Most-recent clips to examine per account; \code{0} = whole profile. \\
+\code{--since} & \emph{none} & Skip clips uploaded before \code{YYYYMMDD}. \\
+\code{--max-downloads} & \emph{none} & Cap on clips downloaded this run. \\
+\code{--dry-run} & off & List what would be downloaded without touching the network or disk. \\
+\code{--cookies-file} & \emph{none} & Path to a Netscape cookie file; required for private accounts. \\
+\code{--log} & \emph{none} & Append timestamped output to this file (in addition to stdout). \\
+\bottomrule
+\end{tabularx}
+\caption{CLI flags for \texttt{fetch\_tiktok.py}.}
+\label{tab:tt-flags}
+\end{table}
+
+% --- Section 6: Tests ---
 \section{Tests}
 
 \subsection{Counts}

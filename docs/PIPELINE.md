@@ -671,26 +671,38 @@ strategy (download archive + on-disk safety net), `--scan-limit`, `--since`,
 Both tools import from **`tools/_media_common.py`**, which provides:
 
 - `slugify_channel` / `sanitize_filename` — filesystem-safe name helpers
-  (illegal characters stripped, whitespace collapsed, non-Latin letters and emoji
-  preserved, length-capped)
-- `stamp_from_datetime` — formats any datetime as a 14-digit UTC
-  `YYYYMMDDHHMMSS` stamp (aware datetimes converted to UTC; naive ones assumed
-  UTC)
+- `stamp_from_datetime` — formats any datetime as a 14-digit UTC `YYYYMMDDHHMMSS`
 - `dest_for` — shared path builder: `{out}/{account}/{YYYY}/{MM}/{title}.{ext}`
-- `load_archive` / `append_archive` — archive I/O (set for O(1) membership;
-  append-mode writes are crash-safe)
-- `make_logger` — tee logger: prints to stdout and optionally appends timestamped
-  lines to a log file
+- `load_archive` / `append_archive` — archive I/O
+- `make_logger` — tee logger
 
-This shared module guarantees both tools produce byte-identical on-disk layouts
-and stamp filenames the same way, so downstream tooling (`organize_medias.py`,
-`cli.py`) can treat YouTube and Instagram audio identically.
+All three tools produce byte-identical on-disk layouts.
+
+### `tools/fetch_tiktok.py`
+
+Downloads the audio of every new video from one or more TikTok accounts. Same
+yt-dlp engine as the YouTube tool. Key differences:
+
+- **No login required** for public accounts. Private/geo-restricted accounts:
+  `--cookies-file <file.txt>` (Netscape-format cookies exported from a browser).
+- **Single-phase listing** — TikTok's yt-dlp flat extractor already returns
+  `timestamp`, `title`, and `uploader` in the listing, so no per-video
+  `extract_info` call is needed. Each new video costs exactly one yt-dlp call
+  (the download), not two.
+- **No JS runtime** — TikTok extraction does not use the EJS challenge system;
+  no deno or `yt-dlp-ejs` needed.
+- **Handle normalisation** — `normalize_handle` strips `@` and lowercases, so
+  `@2MMaroc` and `2mmaroc` both map to the same folder.
+
+```
+tiktok/{handle}/{year}/{month}/{title}.mp3
+tiktok/.download-archive.txt
+```
+
+See [`docs/TIKTOK_DOWNLOADER.md`](TIKTOK_DOWNLOADER.md) for the full walkthrough.
 
 ### Further reading
 
-- [`docs/YOUTUBE_DOWNLOADER.md`](YOUTUBE_DOWNLOADER.md) — full architecture,
-  library choices, design decisions, and a line-by-line walkthrough of
-  `fetch_youtube.py`.
-- [`docs/INSTAGRAM_DOWNLOADER.md`](INSTAGRAM_DOWNLOADER.md) — full architecture,
-  authentication design, and a line-by-line walkthrough of `fetch_instagram.py`
-  and `_media_common.py`.
+- [`docs/YOUTUBE_DOWNLOADER.md`](YOUTUBE_DOWNLOADER.md) — YouTube tool.
+- [`docs/INSTAGRAM_DOWNLOADER.md`](INSTAGRAM_DOWNLOADER.md) — Instagram tool.
+- [`docs/TIKTOK_DOWNLOADER.md`](TIKTOK_DOWNLOADER.md) — TikTok tool.

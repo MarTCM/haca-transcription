@@ -181,9 +181,10 @@ returns `max(scan_limit, max_downloads)` (defaulting `scan_limit` to 50) and
 passes it to yt-dlp as `opts["playlistend"]`. yt-dlp stops paging early once it
 has fetched that many entries, so the listing step is bounded regardless of
 channel size. `scan_limit=0` disables the cap for users who explicitly want the
-full history. The tool also prints `"listing uploads (scanning N most recent)…"`
-then `"examining N upload(s)"` so users can see it working and know it hasn't
-hung.
+full history. The tool also prints `"listing videos (scanning N most recent)…"` then
+`"examining N video(s)"` so users can see it working and know it hasn't hung.
+The same `--scan-limit` / `playlistend` fix applies identically to
+`fetch_tiktok.py` (TikTok profiles can also have thousands of videos).
 
 ### 6.2 yt-dlp JS runtime detection failure (the "two denos" trap)
 
@@ -302,3 +303,7 @@ Both tools implement this pattern identically through the shared
 `_media_common.load_archive` / `_media_common.append_archive` helpers, and
 the tests (`test_download_new_backfills_when_file_exists`,
 `test_download_account_on_disk_check`) verify the backfill behaviour is correct.
+
+`fetch_tiktok.py` uses the same two-mechanism pattern with archive keys of
+the form `tiktok <video_id>`, so the three tools' archives are namespace-safe
+and can even coexist in a single shared archive file.

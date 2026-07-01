@@ -235,35 +235,61 @@ episodes sont acquis lors des executions suivantes, sans re-telecharger l'exista
 {compte}/{annee}/{mois}/{titre}.mp3
 \end{lstlisting}
 Exemple : \texttt{2m\_officiel/2026/07/journal\_20h\_01\_07\_2026.mp3}.
-Cette structure permet de retrouver rapidement tout le contenu d'un mois ou d'un compte
-sans base de donnees externe.
+Le nom de fichier est derive du \textbf{titre de la video} (apres nettoyage des
+caracteres interdits) plutot que d'un horodatage brut --- ce choix rend l'arborescence
+immediatement lisible. L'horodatage \texttt{YYYYMMDDHHMMSS} est calcule en interne
+pour determiner les dossiers \texttt{annee/mois} et sert de repli si la video n'a
+pas de titre. Cette arborescence permet de retrouver rapidement tout le contenu d'un
+mois ou d'un compte sans base de donnees externe.
 
 \textbf{Moteur.} Le telechargement repose sur \textbf{yt-dlp}, invoque avec le format
 \texttt{bestaudio/best} et le post-processeur FFmpeg pour la re-encodage en MP3
 (192 kbit/s). yt-dlp est prefere a youtube-dl pour sa maintenance active et sa meilleure
-gestion des protections anti-bot recentes.
+gestion des protections anti-bot recentes. La version recente de yt-dlp exige, en plus
+d'un interpreteur JavaScript (\texttt{deno} $\geq$ 2.3.0), le paquet Python
+\textbf{\texttt{yt-dlp-ejs}} qui fournit le script de resolution des challenges YouTube
+en mode hors-ligne, sans necessiter \texttt{--remote-components}. En l'absence de l'un
+ou de l'autre, yt-dlp emet un avertissement et certains formats sont indisponibles.
 
 \textbf{Archive de deduplication.} Un fichier d'archive yt-dlp (\texttt{--download-archive})
 est maintenu par compte. Il enregistre les identifiants des videos deja acquises ; les
 appels subsequents sautent automatiquement ces entrees, ce qui garantit l'idempotence
-meme si la liste de la chaine change.
+meme si la liste de la chaine change. Un \emph{filet de securite sur disque} complete
+ce mecanisme : si l'archive est absente mais que le fichier audio existe deja sur le
+disque, l'archive est \textbf{reconstruite automatiquement} (backfill), evitant ainsi
+tout re-telechargement apres la perte accidentelle de l'archive.
+
+\textbf{Progression et journalisation.} Chaque video traitee est prefixee par un
+compteur \texttt{[i/N]} (position dans la liste de la chaine) visible en temps reel.
+Avant le telechargement effectif, la ligne \texttt{[i/N] [..] downloading <titre>}
+s'affiche pour indiquer le debut de l'operation, evitant un silence prolonge sur les
+videos volumineuses. Avec \texttt{--log}, chaque ligne est egalement ecrite dans un
+fichier journal avec horodatage \texttt{YYYY-MM-DD HH:MM:SS}, compatible avec
+\texttt{tail -f}.
 
 \textbf{Options notables.}
 \begin{description}[style=nextline, leftmargin=2.2em, labelindent=0.4em]
   \item[\texttt{--scan-limit N}]
     Limite le balayage aux \texttt{N} episodes les plus recents de la chaine (par defaut :
-    50). Utile pour les chaines tres actives ou seul le flux recent interesse.
+    50). Utile pour les chaines tres actives ou seul le flux recent interesse. Resout
+    le blocage observe sur les grandes chaines (ex.~2M TV avec des milliers de videos) :
+    sans cette limite, yt-dlp parcourait l'integralite de l'historique avant que le
+    filtre \texttt{--max-downloads} ne puisse s'appliquer.
   \item[\texttt{--js-runtimes}]
-    Specifie les interpretes JavaScript disponibles (\texttt{nodejs}, \texttt{deno},
-    \texttt{phantomjs}…) passes a yt-dlp pour le rendu des pages protegees. Sans ce
-    parametre, yt-dlp choisit automatiquement le premier interprete disponible.
+    Specifie le chemin exact de l'interpreteur JavaScript (\texttt{deno:/chemin/deno},
+    \texttt{node}, etc.) a passer a yt-dlp. Necessaire lorsqu'un \texttt{deno} defectueux
+    est presente en premier sur le \texttt{PATH} (piege ``deux denos'').
   \item[\texttt{--dry-run}]
     Mode simulation : affiche la liste des episodes qui seraient telecharges sans ecrire
     aucun fichier. Pratique pour valider la configuration avant un vrai batch.
   \item[\texttt{--log}]
     Chemin vers un fichier de journal. Les evenements (nouveau telechargement, saut,
     erreur reseau) y sont horodates ; l'absence de cette option redirige la sortie vers
-    \texttt{stdout}.
+    \texttt{stdout} uniquement.
+  \item[\texttt{--since YYYYMMDD}]
+    Ignore les videos publiees avant la date indiquee.
+  \item[\texttt{--audio-format}]
+    Codec audio cible : \texttt{mp3} (defaut), \texttt{m4a}, \texttt{opus}, etc.
 \end{description}
 
 % ------------------------------------------------------------
@@ -291,11 +317,100 @@ un format MP3 uniforme en sortie.
 \begin{lstlisting}
 {compte}/{annee}/{mois}/{titre}.mp3
 \end{lstlisting}
-Le titre est derive de la date de publication et du shortcode Instagram
-(ex. \texttt{2m\_maroc/2026/07/2026-07-01\_CxY3z.mp3}) pour garantir l'unicite.
+Le titre est derive de la \textbf{premiere ligne de la legende} (\emph{caption}) du post
+Instagram apres nettoyage des caracteres interdits. En l'absence de legende, le
+\textbf{shortcode} du post sert de nom de fichier, garantissant l'unicite.
+
+\textbf{Deduplication.} Un fichier d'archive texte (\texttt{instagram/.download-archive.txt})
+memorise les shortcodes deja traites au format \texttt{instagram <shortcode>}, compatible
+avec le format yt-dlp. A chaque execution, seuls les nouveaux posts sont telecharges.
+Un \emph{filet de securite sur disque} identique a celui du module YouTube reconstruit
+automatiquement l'archive si elle est absente.
+
+\textbf{Progression.} Comme pour YouTube, un compteur \texttt{[compte i/N]} prefixe
+chaque ligne de sortie, et la ligne \texttt{[..] downloading <titre>} s'affiche avant le
+debut effectif du telechargement.
 
 \textbf{Deduplication.} Un registre JSON local (un fichier par compte) memorise les
 shortcodes deja traites. A chaque execution, seuls les nouveaux posts sont telecharges.
+
+% ------------------------------------------------------------
+\subsection{Telechargeur TikTok -- \texttt{fetch\_tiktok.py}}
+% ------------------------------------------------------------
+
+\textbf{Objectif.} Telecharger en batch l'audio des comptes TikTok de radiodiffuseurs
+marocains de maniere \emph{incrementale} : seuls les nouveaux clips sont acquis lors
+des executions suivantes, sans re-telecharger le contenu deja traite.
+
+\textbf{Arborescence de sortie.}
+\begin{lstlisting}
+{out}/{compte}/{annee}/{mois}/{titre}.mp3
+\end{lstlisting}
+Exemple : \texttt{tiktok/2m\_officiel/2026/06/journal-du-soir.mp3}.
+Comme pour YouTube, le repertoire racine par defaut est \texttt{./tiktok} ;
+il suffit de le pointer vers \texttt{medias/} pour rendre les deux outils
+directement interoperables avec \texttt{cli.py}.
+
+\textbf{Moteur yt-dlp (sans moteur JavaScript).} Le script utilise le meme
+moteur \textbf{yt-dlp} que \texttt{fetch\_youtube.py}, invoque via l'API Python
+\code{YoutubeDL}. A la difference de YouTube, l'extraction TikTok ne necessite
+\textbf{aucun interpreteur JavaScript} (Deno, Node, etc.) : yt-dlp resout les
+URL TikTok entierement en Python, sans challenge JavaScript cote client. Il n'est
+donc pas necessaire d'installer \texttt{yt-dlp-ejs} ni un runtime externe pour
+ce script.
+
+\textbf{Listage en une seule phase.} Contrairement au listage YouTube en deux
+phases (liste plate puis metadonnees par video), l'API TikTok retourne
+\textbf{deja le timestamp, le titre et l'identifiant de l'auteur} dans chaque
+entree de la liste plate (\texttt{extract\_flat="in\_playlist"}). Un seul appel
+yt-dlp suffit donc pour obtenir toutes les metadonnees necessaires au filtrage
+et a la construction du chemin de sortie, sans appel complementaire par video.
+Cela rend le listage incrementiel particulierement rapide sur les grands comptes.
+
+\textbf{Deduplication.} Le meme mecanisme en deux couches que les autres outils
+est applique :
+\begin{itemize}
+  \item \textbf{Archive de telechargement} : un fichier texte
+    \texttt{.download-archive.txt} a la racine de sortie enregistre une entree
+    \texttt{tiktok <id>} par clip telecharge ; les executions suivantes sautent
+    immediatement les entrees deja presentes.
+  \item \textbf{Filet de securite sur disque} : si le fichier \texttt{.mp3} cible
+    existe deja sans entree d'archive correspondante (ex.~apres une perte de
+    l'archive), l'archive est reconstruite (\emph{backfill}) et le clip est
+    ignore, evitant tout re-telechargement inutile.
+\end{itemize}
+
+\textbf{Comptes prives (\texttt{--cookies-file}).} Pour acceder a des comptes
+TikTok prives, l'option \texttt{--cookies-file} permet de fournir un fichier de
+cookies (au format Netscape, exportable depuis le navigateur). Ce fichier est
+transmis directement a yt-dlp pour authentifier les requetes, sans stocker de
+mot de passe en clair.
+
+\textbf{Options notables.}
+\begin{description}[style=nextline, leftmargin=2.2em, labelindent=0.4em]
+  \item[\texttt{--account}]
+    Identifiant (handle) du compte TikTok a telecharger. Repetable pour traiter
+    plusieurs comptes en une seule invocation
+    (ex.~\texttt{--account 2m --account medi1}).
+  \item[\texttt{--scan-limit N}]
+    Limite le balayage aux \texttt{N} clips les plus recents du compte (defaut :
+    50). Passer \texttt{0} desactive la limite et parcourt tout l'historique.
+  \item[\texttt{--since YYYYMMDD}]
+    Ignore les clips publies avant la date indiquee.
+  \item[\texttt{--max-downloads N}]
+    Plafonne le nombre de nouveaux telechargements pour cette execution.
+  \item[\texttt{--dry-run}]
+    Mode simulation : affiche la liste des clips qui seraient telecharges sans
+    ecrire aucun fichier.
+  \item[\texttt{--cookies-file}]
+    Chemin vers un fichier de cookies Netscape ; necessaire pour les comptes
+    prives.
+  \item[\texttt{--log}]
+    Chemin vers un fichier journal ; les evenements y sont horodates
+    (\texttt{YYYY-MM-DD HH:MM:SS}).
+  \item[\texttt{--audio-format}]
+    Codec audio cible : \texttt{mp3} (defaut), \texttt{m4a}, \texttt{opus}, etc.
+\end{description}
 
 % ------------------------------------------------------------
 \subsection{Module de fonctions partage — \texttt{\_media\_common.py}}
@@ -323,12 +438,14 @@ et \texttt{fetch\_instagram.py}.
 \subsection{Suite de tests}
 % ------------------------------------------------------------
 
-Les trois modules (\texttt{fetch\_youtube.py}, \texttt{fetch\_instagram.py} et
-\texttt{\_media\_common.py}) sont couverts par une suite de \textbf{178 tests} executes
-avec \textbf{pytest}. Les tests utilisent des bouchons (\emph{mocks}) pour yt-dlp,
-instaloader et FFmpeg afin de rester reproductibles sans connexion reseau ni media reels.
-Les cas couverts incluent la construction de l'arborescence, la deduplication, la gestion
-des erreurs reseau, la re-authentification 2FA et les modes \texttt{--dry-run}.
+Les quatre modules (\texttt{fetch\_youtube.py}, \texttt{fetch\_instagram.py},
+\texttt{fetch\_tiktok.py} et \texttt{\_media\_common.py}) sont couverts par une suite de
+\textbf{216 tests} executes avec \textbf{pytest}. Les 38 nouveaux tests TikTok
+(\texttt{test\_fetch\_tiktok.py}) utilisent un bouchon \texttt{FakeTikTokYDL} qui
+intercepte les appels yt-dlp sans connexion reseau. Les cas couverts incluent la
+construction de l'arborescence, la deduplication, la gestion des erreurs, et le mode
+\texttt{--dry-run}. L'ensemble de la suite reste reproductible sans connexion reseau
+ni media reels.
 
 \vspace{4pt}
 \rule{\linewidth}{0.4pt}\\[2pt]
