@@ -215,3 +215,57 @@ def test_expand_hour_filter_across_extensions(mixed_media):
         "tv/2024/06/01/20240601100000.mp4",
         "tv/2024/06/01/20240601110000.mkv",
     ]
+
+
+# --------------------------------------------------------------------------- #
+# Platform modes (YouTube & TikTok)
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def platform_media(tmp_path):
+    """Build a mock platform (youtube/tiktok) tree:
+    channel1/2024/06/video1.mp3
+    channel1/2024/06/video2.mp4
+    channel2/2025/01/video3.mp3
+    """
+    layout = {
+        "channel1/2024/06": ["video1.mp3", "video2.mp4"],
+        "channel2/2025/01": ["video3.mp3"],
+    }
+    for rel, files in layout.items():
+        d = tmp_path / rel
+        d.mkdir(parents=True)
+        for name in files:
+            (d / name).write_bytes(b"\x00")
+    # A stray file/folder that should be ignored
+    (tmp_path / "channel1/2024/06/ignore.txt").write_text("ignore me")
+    return tmp_path
+
+
+def test_scan_platform_media(platform_media):
+    idx = scan_medias(platform_media, mode="youtube")
+    assert set(idx) == {"channel1", "channel2"}
+    assert idx["channel1"][2024][6] == {0: ["video1.mp3", "video2.mp4"]}
+    assert idx["channel2"][2025][1] == {0: ["video3.mp3"]}
+
+
+def test_expand_platform_media_all(platform_media):
+    files = expand_selections(platform_media, mode="youtube")
+    assert files == [
+        "channel1/2024/06/video1.mp3",
+        "channel1/2024/06/video2.mp4",
+        "channel2/2025/01/video3.mp3",
+    ]
+
+
+def test_expand_platform_media_filters(platform_media):
+    files = expand_selections(platform_media, channels=["channel1"], years={2024}, months={6}, mode="youtube")
+    assert files == [
+        "channel1/2024/06/video1.mp3",
+        "channel1/2024/06/video2.mp4",
+    ]
+
+
+def test_expand_platform_media_ignores_day_and_hour(platform_media):
+    # day/hour filters are ignored under youtube/tiktok modes, returning all files
+    files = expand_selections(platform_media, days={15}, hours={9}, mode="tiktok")
+    assert len(files) == 3

@@ -148,3 +148,37 @@ def test_full_run_with_failure_sets_exit_code(medias, tmp_path, monkeypatch):
     text = log_file.read_text()
     assert "[FAIL]" in text and "boom" in text
     assert "1 ok, 1 failed" in text
+
+
+# --------------------------------------------------------------------------- #
+# Mode (medias, youtube, tiktok) tests
+# --------------------------------------------------------------------------- #
+def test_cli_mode_youtube_defaults_to_youtube_dir(tmp_path, capsys, monkeypatch):
+    # If --medias is not set, it defaults to the mode directory
+    monkeypatch.chdir(tmp_path)
+    rc = cli.main(["--mode", "youtube", "--dry-run"])
+    # Should fail because directory "youtube" does not exist in Cwd
+    assert rc == cli.EXIT_USAGE
+    err = capsys.readouterr().err
+    assert "youtube directory not found" in err
+
+
+def test_cli_rejects_unsupported_filters_for_platform_modes():
+    rc = cli.main(["--mode", "youtube", "--day", "15", "--dry-run"])
+    assert rc == cli.EXIT_USAGE
+
+    rc_hours = cli.main(["--mode", "tiktok", "--hours", "9-12", "--dry-run"])
+    assert rc_hours == cli.EXIT_USAGE
+
+
+def test_cli_dry_run_youtube_mode(tmp_path, capsys):
+    # Setup a mock youtube directory
+    yt_dir = tmp_path / "youtube"
+    d = yt_dir / "mychannel/2024/06"
+    d.mkdir(parents=True)
+    (d / "video_title.mp3").write_bytes(b"\x00")
+
+    rc = cli.main(["--mode", "youtube", "--medias", str(yt_dir), "--dry-run"])
+    assert rc == cli.EXIT_OK
+    out = capsys.readouterr().out.splitlines()
+    assert "mychannel/2024/06/video_title.mp3" in out
