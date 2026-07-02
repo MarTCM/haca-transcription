@@ -318,3 +318,18 @@ and can even coexist in a single shared archive file.
 1. **Decoupled Two-Step download.** The postprocessing was changed from `FFmpegExtractAudio` to a decoupled two-step flow: download the raw video first, and then extract audio using a standalone `ffmpeg` subprocess. If `ffmpeg` fails because of a missing audio track, the script catches it gracefully and presents a clear error message.
 2. **Improved Format Selector.** The yt-dlp format selector was updated to `play/worst[vcodec^=h264]/worst[vcodec!=none]/bestaudio/best`. This bypasses video-only HEVC streams in favor of direct playback links (`play`) or H.264 formats that reliably contain audio.
 3. **Browser Impersonation (`curl_cffi`).** The project's virtual environment includes the `curl_cffi` dependency, enabling browser impersonation. The script must be run using `.venv/bin/python` to ensure `curl_cffi` is loaded. Impersonation convinces TikTok's servers to return audio-inclusive streams.
+
+### 6.6 Support for Platform Transcription Modes (YouTube & TikTok)
+
+**Problem.** The batch transcription pipeline (`cli.py` and `core/selection.py`) was tightly coupled to the standard broadcast directory structure: `medias/{channel}/{year}/{month}/{day}/{filename}.mp3` (where year, month, and day are numeric, and the filename is a timestamp from which the broadcast hour is parsed).
+YouTube and TikTok downloaders use a 4-level structure (`{channel}/{year}/{month}/{video_title}.mp3`), where the filename is the sanitized video title (no date timestamp) and there is no day folder.
+A naive attempt to use the selection CLI on these directories resulted in:
+1. Directory scanning failing because no `day` directory exists.
+2. Timestamp parsing (`hour_of`) failing because filenames are arbitrary strings, causing files to be skipped if `--hours` filters were applied.
+3. Mismatched output `.srt` file structures.
+
+**Solution — Mode-Aware Scanning & Virtual Day Key:**
+1. **Multi-level Walk.** Enhanced `scan_medias()` and `expand_selections()` to accept a `mode` parameter (`medias`, `youtube`, or `tiktok`). For platform modes, a 4-level filesystem walk is executed.
+2. **Backward-Compatible Index.** To avoid breaking the existing `MediaIndex` type footprint (`channel -> year -> month -> day -> [filenames]`) utilized by downstream modules, files in platform modes are indexed under a virtual day key of `0`.
+3. **Robust CLI Validation.** Modified `cli.py` to add a `--mode` parameter (defaulting the `--medias` root path to the mode value). If a user tries to apply `--day` or `--hours` filters while `--mode` is `youtube` or `tiktok`, the CLI throws a validation error instead of silently matching 0 files, ensuring a highly intuitive user experience.
+
