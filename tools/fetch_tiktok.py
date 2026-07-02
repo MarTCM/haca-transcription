@@ -40,6 +40,8 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import re
+import shutil
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -142,13 +144,17 @@ def build_ydl_list_opts(
     return opts
 
 
-def build_ydl_audio_opts(
+def build_ydl_video_opts(
     dest_dir: Path,
     filename_stem: str,
-    audio_format: str,
     cookies_file: Optional[Path] = None,
 ) -> dict:
-    """yt-dlp options for downloading one TikTok video's audio.
+    """yt-dlp options for downloading one TikTok video (no postprocessors).
+
+    We download the raw video file and handle audio extraction separately
+    with ffmpeg, because TikTok often serves HEVC streams without an audio
+    track when browser impersonation (``curl_cffi``) is unavailable.  The
+    built-in ``FFmpegExtractAudio`` postprocessor crashes on those files.
 
     ``paths.home`` is set literally (not run through outtmpl expansion) so exotic
     account names cannot break the template.  Any ``%`` in the title stem is
@@ -159,18 +165,56 @@ def build_ydl_audio_opts(
         "noprogress": True,
         "paths": {"home": str(dest_dir)},
         "outtmpl": {"default": f"{filename_stem.replace('%', '%%')}.%(ext)s"},
-        "format": "bestaudio/best",
-        "postprocessors": [
-            {
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": audio_format,
-                "preferredquality": "0",
-            }
-        ],
+        "format": "play/worst[vcodec^=h264]/worst[vcodec!=none]/bestaudio/best",
+        # No postprocessors — we run ffmpeg ourselves after download.
     }
     if cookies_file:
         opts["cookiefile"] = str(cookies_file)
     return opts
+
+
+def _ffmpeg_extract_audio(video_path: Path, audio_path: Path, audio_format: str) -> None:
+    """Extract audio from *video_path* into *audio_path* using ffmpeg.
+
+    Raises :class:`RuntimeError` if the file contains no audio stream or if
+    ffmpeg fails for another reason.
+    """
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise RuntimeError("ffmpeg not found on PATH")
+
+    cmd = [
+        ffmpeg, "-hide_banner", "-y",
+        "-i", str(video_path),
+        "-vn",                  # drop video
+        "-acodec", _ffmpeg_codec(audio_format),
+        "-q:a", "0",            # best quality
+        str(audio_path),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        stderr = result.stderr or ""
+        if "does not contain any stream" in stderr or "Output file is empty" in stderr:
+            raise RuntimeError(
+                f"video has no audio stream (TikTok may require curl_cffi "
+                f"for proper impersonation — pip install curl_cffi)"
+            )
+        raise RuntimeError(f"ffmpeg failed (rc={result.returncode}): {stderr[-300:]}")
+
+
+def _ffmpeg_codec(audio_format: str) -> str:
+    """Map user-facing audio format name to the ffmpeg encoder name."""
+    mapping = {
+        "mp3": "libmp3lame",
+        "m4a": "aac",
+        "aac": "aac",
+        "opus": "libopus",
+        "vorbis": "libvorbis",
+        "ogg": "libvorbis",
+        "flac": "flac",
+        "wav": "pcm_s16le",
+    }
+    return mapping.get(audio_format.lower(), audio_format)
 
 
 # ----------------------------------------------------------------------------- #
@@ -263,13 +307,44 @@ def download_audio(
     ydl_factory: Callable,
     cookies_file: Optional[Path] = None,
 ) -> None:
-    """Download + extract audio for one TikTok video into ``dest``."""
+    """Download a TikTok video then extract its audio with ffmpeg.
+
+    Two-step process that avoids yt-dlp's ``FFmpegExtractAudio`` postprocessor
+    which crashes when TikTok serves HEVC streams without an audio track.
+    """
     dest.parent.mkdir(parents=True, exist_ok=True)
     ext = audio_format.lstrip(".")
     stem = dest.name[: -(len(ext) + 1)]
-    opts = build_ydl_audio_opts(dest.parent, stem, audio_format, cookies_file)
+    opts = build_ydl_video_opts(dest.parent, stem, cookies_file)
+
+    # Step 1: download raw video
     with ydl_factory(opts) as ydl:
         ydl.download([video_url])
+
+    # Step 2: find the downloaded video file (yt-dlp picks the extension)
+    video_file = _find_downloaded_video(dest.parent, stem)
+    if video_file is None:
+        raise RuntimeError(f"yt-dlp did not produce a file matching {stem!r}")
+
+    # Step 3: extract audio with ffmpeg
+    try:
+        _ffmpeg_extract_audio(video_file, dest, audio_format)
+    finally:
+        # Clean up the intermediate video file
+        if video_file.exists() and video_file != dest:
+            video_file.unlink(missing_ok=True)
+
+
+def _find_downloaded_video(directory: Path, stem: str) -> Optional[Path]:
+    """Locate the video file yt-dlp just wrote (extension varies)."""
+    for candidate in directory.iterdir():
+        if candidate.is_file() and candidate.stem == stem:
+            return candidate
+    # Fallback: stem matching may fail with yt-dlp's % escaping
+    for candidate in directory.iterdir():
+        if candidate.is_file() and candidate.name.startswith(stem[:20]):
+            return candidate
+    return None
 
 
 def entry_url(entry: dict) -> str:
@@ -307,8 +382,11 @@ def download_account(
     total = len(entries)
     log(f"[{handle}] examining {total} video(s)")
 
+    # The denominator for the progress counter: --max-downloads when given,
+    # otherwise the total number of entries being examined.
+    progress_total = cfg.max_downloads if cfg.max_downloads is not None else total
+
     for idx, entry in enumerate(entries, start=1):
-        pos = f"[{handle} {idx}/{total}]"
 
         if cfg.max_downloads is not None and stats.downloaded >= cfg.max_downloads:
             log(f"[{handle}] reached --max-downloads={cfg.max_downloads}, stopping")
@@ -323,6 +401,7 @@ def download_account(
             stamp = stamp_from_entry(entry)
         except Exception as exc:  # noqa: BLE001
             stats.errors += 1
+            pos = f"[{handle} {stats.downloaded + stats.errors}/{progress_total}]"
             log(f"  {pos} [error] {entry.get('id')}: {exc}")
             continue
 
@@ -339,6 +418,7 @@ def download_account(
             continue
 
         title = title_from_entry(entry, stamp)
+        pos = f"[{handle} {stats.downloaded + 1}/{progress_total}]"
         if cfg.dry_run:
             stats.planned.append((title, dest))
             log(f"  {pos} [plan] {title} -> {dest}")
