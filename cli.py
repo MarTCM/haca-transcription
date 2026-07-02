@@ -64,8 +64,10 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
-    ap.add_argument("--medias", default="medias",
-                    help="Root of the medias directory tree.")
+    ap.add_argument("--mode", choices=["medias", "youtube", "tiktok"], default="medias",
+                    help="Ingestion mode structure.")
+    ap.add_argument("--medias", default=None,
+                    help="Root of the media directory tree (defaults to the value of --mode).")
 
     # --- Filters (omit any = all) ---
     g = ap.add_argument_group("filters (omit any flag to mean 'all')")
@@ -170,6 +172,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         months = parse_ranges(args.month)
         days = parse_ranges(args.day)
         hours = parse_ranges(args.hours)
+
+        if args.mode in ("youtube", "tiktok"):
+            if args.day is not None:
+                raise SelectionError(f"--day filter is not supported in {args.mode} mode")
+            if args.hours is not None:
+                raise SelectionError(f"--hours filter is not supported in {args.mode} mode")
     except SelectionError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_USAGE
@@ -182,14 +190,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return EXIT_USAGE
 
     # 3. Expand the selection against the medias tree.
-    medias_root = Path(args.medias)
+    mode = args.mode
+    medias_root_str = args.medias if args.medias is not None else mode
+    medias_root = Path(medias_root_str)
     if not medias_root.is_dir():
-        print(f"error: medias directory not found: {medias_root}", file=sys.stderr)
+        print(f"error: {mode} directory not found: {medias_root}", file=sys.stderr)
         return EXIT_USAGE
 
     files = expand_selections(
         medias_root, channels=channels, years=years,
         months=months, days=days, hours=hours,
+        mode=mode,
     )
     if not files:
         print("0 files matched the given filters.", file=sys.stderr)
