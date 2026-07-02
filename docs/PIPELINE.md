@@ -691,6 +691,14 @@ yt-dlp engine as the YouTube tool. Key differences:
   (the download), not two.
 - **No JS runtime** — TikTok extraction does not use the EJS challenge system;
   no deno or `yt-dlp-ejs` needed.
+- **Two-step audio extraction** — downloads the raw video first, then extracts
+  audio with a direct `ffmpeg` subprocess call. This avoids yt-dlp's
+  `FFmpegExtractAudio` postprocessor, which crashes on TikTok's HEVC (bytevc1)
+  video-only streams. The format selector prefers `play`/h264 formats that
+  reliably include audio.
+- **Browser impersonation** — requires `curl_cffi` (installed in the project
+  venv) so that TikTok serves audio-inclusive streams. Run with
+  `.venv/bin/python` to ensure the dependency is available.
 - **Handle normalisation** — `normalize_handle` strips `@` and lowercases, so
   `@2MMaroc` and `2mmaroc` both map to the same folder.
 

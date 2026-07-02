@@ -359,6 +359,8 @@ URL TikTok entierement en Python, sans challenge JavaScript cote client. Il n'es
 donc pas necessaire d'installer \texttt{yt-dlp-ejs} ni un runtime externe pour
 ce script.
 
+\textbf{Extraction audio robuste et impersonation.} Pour contourner le probleme des flux video-only HEVC (sans piste audio) servis par TikTok, le script utilise un selecteur de format adaptatif (\texttt{play/worst[vcodec\^{}=h264]/...}) et realise l'extraction audio en deux temps (telechargement video puis extraction via un sous-processus \texttt{ffmpeg}) plutot que d'utiliser le post-processeur par defaut de yt-dlp. De plus, l'utilisation de l'environnement virtuel du projet (\texttt{.venv}) permet d'exploiter \texttt{curl\_cffi} pour l'impersonation de navigateur, indispensable pour obtenir de TikTok des flux munis de pistes audio.
+
 \textbf{Listage en une seule phase.} Contrairement au listage YouTube en deux
 phases (liste plate puis metadonnees par video), l'API TikTok retourne
 \textbf{deja le timestamp, le titre et l'identifiant de l'auteur} dans chaque

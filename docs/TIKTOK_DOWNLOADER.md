@@ -118,7 +118,7 @@ flowchart TD
     H -- yes --> I[backfill archive, skip]
     H -- no --> J{dry-run?}
     J -- yes --> K[record plan, skip]
-    J -- no --> L[download_audio: bestaudio + FFmpegExtractAudio]
+    J -- no --> L["download_audio: download video (play/h264) + ffmpeg extract"]
     L --> M[record in archive]
 ```
 
@@ -126,8 +126,8 @@ flowchart TD
 
 | Half | Symbols |
 |------|---------|
-| **Pure core** | `normalize_handle`, `account_url`, `stamp_from_entry`, `archive_key`, `title_from_entry`, `tiktok_dest_path`, `build_ydl_list_opts`, `build_ydl_audio_opts`, `entry_url`, `TikConfig`, `RunStats` |
-| **I/O** | `list_entries`, `download_audio`, `download_account`, `download_all`, `main` |
+| **Pure core** | `normalize_handle`, `account_url`, `stamp_from_entry`, `archive_key`, `title_from_entry`, `tiktok_dest_path`, `build_ydl_list_opts`, `build_ydl_video_opts`, `_ffmpeg_extract_audio`, `_ffmpeg_codec`, `entry_url`, `TikConfig`, `RunStats` |
+| **I/O** | `list_entries`, `download_audio`, `_find_downloaded_video`, `download_account`, `download_all`, `main` |
 
 `ydl_factory` is injected everywhere — the full orchestration loop is exercised
 in tests with a `FakeTikTokYDL`, no network or ffmpeg required.
@@ -255,7 +255,7 @@ def tiktok_dest_path(out_root, account, entry, ext):
 - Composes the full path using `dest_for` from `_media_common`:
   `out/{account}/{YYYY}/{MM}/{title}.{ext}`.
 
-### 5.7 `build_ydl_list_opts` / `build_ydl_audio_opts`
+### 5.7 `build_ydl_list_opts` / `build_ydl_video_opts`
 
 ```python
 def build_ydl_list_opts(playlistend=None, cookies_file=None):
@@ -274,24 +274,29 @@ def build_ydl_list_opts(playlistend=None, cookies_file=None):
   private/geo-restricted accounts.
 
 ```python
-def build_ydl_audio_opts(dest_dir, filename_stem, audio_format, cookies_file=None):
+def build_ydl_video_opts(dest_dir, filename_stem, cookies_file=None):
     opts = {
         "quiet": True, "noprogress": True,
         "paths": {"home": str(dest_dir)},
         "outtmpl": {"default": f"{filename_stem.replace('%', '%%')}.%(ext)s"},
-        "format": "bestaudio/best",
-        "postprocessors": [{"key": "FFmpegExtractAudio",
-                            "preferredcodec": audio_format,
-                            "preferredquality": "0"}],
+        "format": "play/worst[vcodec^=h264]/worst[vcodec!=none]/bestaudio/best",
+        # No postprocessors — ffmpeg is run separately after download.
     }
     if cookies_file:
         opts["cookiefile"] = str(cookies_file)
     return opts
 ```
 
-- Same structure as the YouTube tool's `build_ydl_opts`. `paths.home` is literal
-  (not template-expanded) so exotic handle names can't break the `outtmpl`. Any
-  `%` in the title is escaped to `%%`.
+- **No `FFmpegExtractAudio` postprocessor.** TikTok's HEVC (bytevc1) formats
+  report `aac` audio in metadata but serve video-only files. The built-in
+  postprocessor crashes on these (`unable to obtain file audio codec with
+  ffprobe`). Instead, audio extraction is handled by a direct `ffmpeg` subprocess
+  call in `_ffmpeg_extract_audio` (see §5.11).
+- The format selector `play/worst[vcodec^=h264]/…` prefers the `play` format
+  (direct stream, always includes audio) or h264 formats (which reliably include
+  audio), avoiding the HEVC formats that are video-only.
+- `paths.home` is literal (not template-expanded) so exotic handle names can't
+  break the `outtmpl`. Any `%` in the title is escaped to `%%`.
 
 ### 5.8 `TikConfig`
 
@@ -354,21 +359,35 @@ def list_entries(handle, ydl_factory, playlistend=None, cookies_file=None):
 - `ydl_factory` is injected (real `YoutubeDL` in production, `FakeTikTokYDL` in
   tests).
 
-### 5.11 `download_audio`
+### 5.11 `download_audio` (two-step: download + ffmpeg)
 
 ```python
 def download_audio(video_url, dest, audio_format, ydl_factory, cookies_file=None):
     dest.parent.mkdir(parents=True, exist_ok=True)
     ext = audio_format.lstrip(".")
     stem = dest.name[: -(len(ext) + 1)]
-    opts = build_ydl_audio_opts(dest.parent, stem, audio_format, cookies_file)
+    opts = build_ydl_video_opts(dest.parent, stem, cookies_file)
+    # Step 1: download raw video
     with ydl_factory(opts) as ydl:
         ydl.download([video_url])
+    # Step 2: find the downloaded video file
+    video_file = _find_downloaded_video(dest.parent, stem)
+    # Step 3: extract audio with ffmpeg
+    try:
+        _ffmpeg_extract_audio(video_file, dest, audio_format)
+    finally:
+        if video_file.exists() and video_file != dest:
+            video_file.unlink(missing_ok=True)
 ```
 
-- Takes the full `dest` path and recovers the stem by stripping the `.{ext}`
-  suffix — single source of truth for the filename (the path already computed by
-  `tiktok_dest_path`).
+- **Two-step process** that avoids yt-dlp's `FFmpegExtractAudio` postprocessor,
+  which crashes when TikTok serves HEVC streams without an audio track.
+- Step 1 downloads the raw video (yt-dlp picks the extension, usually `.mp4`).
+- Step 2 locates the file on disk (`_find_downloaded_video` matches by stem).
+- Step 3 runs `ffmpeg -vn` to extract audio into the final `.mp3`.
+- The intermediate video file is always cleaned up in a `finally` block.
+- If the file has no audio stream, `_ffmpeg_extract_audio` raises a clear
+  `RuntimeError` suggesting `pip install curl_cffi` for proper impersonation.
 
 ### 5.12 `download_account` — the orchestration loop
 
@@ -382,8 +401,7 @@ def download_account(handle, cfg, ydl_factory, *, log=print):
     total = len(entries)
     log(f"[{handle}] examining {total} video(s)")
     for idx, entry in enumerate(entries, start=1):
-        pos = f"[{handle} {idx}/{total}]"
-        if cfg.max_downloads is not None and stats.downloaded >= cfg.max_downloads:
+            if cfg.max_downloads is not None and stats.downloaded >= cfg.max_downloads:
             ...break
         key = archive_key(entry)
         if key in archive_ids:
@@ -400,7 +418,9 @@ def download_account(handle, cfg, ydl_factory, *, log=print):
             stats.skipped_disk += 1; continue
         title = title_from_entry(entry, stamp)
         if cfg.dry_run:
-            stats.planned.append((title, dest)); log(f"  {pos} [plan] ..."); continue
+            pos = f"[{handle} {stats.downloaded + 1}/{progress_total}]"
+            log(f"  {pos} [plan] ..."); continue
+        pos = f"[{handle} {stats.downloaded + 1}/{progress_total}]"
         log(f"  {pos} [..] downloading {title}")
         try:
             download_audio(entry_url(entry), dest, cfg.audio_format, ydl_factory, cfg.cookies_file)
@@ -414,6 +434,8 @@ def download_account(handle, cfg, ydl_factory, *, log=print):
 Step by step — same pattern as the other tools:
 - `listing_end()` bounds the scan; listing feedback lines prevent confusion.
 - **`--max-downloads` cap** — counts downloads, not all examined entries.
+- **Progress counter** — `[handle X/Y]` where Y is `--max-downloads` (or total
+  entries if unbounded) and X is the download number, not the scan index.
 - **Archive check** (dedup #1, O(1)) — skip immediately with no download.
 - **`stamp_from_entry` in-loop** — failures are isolated per-video.
 - **`--since` filter** — lexicographic `YYYYMMDD` comparison.
@@ -473,7 +495,7 @@ A class-level `entries` list + `downloaded` list. `extract_info` returns
 | `archive_key` | 2 |
 | `title_from_entry`, `tiktok_dest_path` | 4 |
 | `entry_url` | 2 |
-| `build_ydl_list_opts`, `build_ydl_audio_opts` | 4 |
+| `build_ydl_list_opts`, `build_ydl_video_opts` | 4 |
 | `TikConfig` | 4 (`listing_end`, `archive_path`) |
 | `download_account` loop | 8 (new/archived/disk/idempotent/max/since/dry/error) |
 | `download_all` | 1 |
@@ -486,11 +508,15 @@ A class-level `entries` list + `downloaded` list. `extract_info` returns
 ### 7.1 Install
 
 ```bash
-pip install -r transcription/tools/requirements-tiktok.txt   # just yt-dlp
+pip install -r transcription/tools/requirements-tiktok.txt   # yt-dlp + curl_cffi
 sudo apt install ffmpeg
 ```
 
 No JS runtime or `yt-dlp-ejs` needed — TikTok uses no EJS challenge system.
+`curl_cffi` is needed for **browser impersonation**, which is required for TikTok
+to serve formats that include audio. Without it, TikTok may serve HEVC video-only
+streams. If your project uses a virtual environment, make sure to run the tool
+with the venv's Python (`.venv/bin/python`).
 
 ### 7.2 Private / geo-restricted accounts
 

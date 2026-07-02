@@ -1788,6 +1788,15 @@ There is therefore no need to install \code{yt-dlp-ejs}, configure a \code{--js-
 override, or have Deno on \code{PATH} to use this tool. The only non-standard
 dependency for audio re-encoding remains \textbf{ffmpeg} on \code{PATH}.
 
+\subsection{Robust Audio Extraction and Browser Impersonation}
+
+To bypass the problem of video-only HEVC (H.265) streams served by TikTok (which cause yt-dlp's default post-processor to crash due to the absence of an audio track), the tool utilizes a custom two-step extraction process:
+\begin{enumerate}[leftmargin=1.6em]
+  \item \textbf{Download video file.} Download the raw video using an adaptive format selector: \code{play/worst[vcodec\^{}=h264]/worst[vcodec!=none]/bestaudio/best}. This prefers direct streams or H.264 formats that reliably contain audio, avoiding video-only HEVC streams.
+  \item \textbf{Manual audio extraction.} Extract the audio track to the final destination via a direct \code{ffmpeg} subprocess call, handling failures gracefully if no audio stream is present.
+\end{enumerate}
+Additionally, the virtual environment includes the \code{curl\_cffi} package for browser impersonation, which convinces TikTok's servers to return audio-inclusive streams. The tool must be run using \code{.venv/bin/python} to leverage this.
+
 \subsection{Single-phase listing strategy}
 
 The YouTube tool requires two yt-dlp calls per video: a lightweight flat listing

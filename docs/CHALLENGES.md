@@ -307,3 +307,14 @@ the tests (`test_download_new_backfills_when_file_exists`,
 `fetch_tiktok.py` uses the same two-mechanism pattern with archive keys of
 the form `tiktok <video_id>`, so the three tools' archives are namespace-safe
 and can even coexist in a single shared archive file.
+
+### 6.5 TikTok HEVC video-only streams and browser impersonation
+
+**Symptom.** Audio extraction failed during the download process for certain TikTok videos with `ffprobe` errors complaining about missing audio tracks, or yt-dlp crashing with a `PostProcessingError` when using `FFmpegExtractAudio`.
+
+**Root cause.** Without proper browser impersonation, TikTok serves high-quality video-only streams (HEVC/`bytevc1`) for many of its formats. Even though the format metadata claims to have `aac` audio, the actual downloaded stream contains no audio track. When yt-dlp tried to extract audio from these files via its built-in postprocessor, `ffprobe` reported no audio codec, causing a fatal error.
+
+**Fix — Two-part solution:**
+1. **Decoupled Two-Step download.** The postprocessing was changed from `FFmpegExtractAudio` to a decoupled two-step flow: download the raw video first, and then extract audio using a standalone `ffmpeg` subprocess. If `ffmpeg` fails because of a missing audio track, the script catches it gracefully and presents a clear error message.
+2. **Improved Format Selector.** The yt-dlp format selector was updated to `play/worst[vcodec^=h264]/worst[vcodec!=none]/bestaudio/best`. This bypasses video-only HEVC streams in favor of direct playback links (`play`) or H.264 formats that reliably contain audio.
+3. **Browser Impersonation (`curl_cffi`).** The project's virtual environment includes the `curl_cffi` dependency, enabling browser impersonation. The script must be run using `.venv/bin/python` to ensure `curl_cffi` is loaded. Impersonation convinces TikTok's servers to return audio-inclusive streams.
