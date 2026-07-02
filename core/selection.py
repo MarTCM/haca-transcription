@@ -115,17 +115,22 @@ def _int_or_none(name: str) -> Optional[int]:
     return int(name) if name.isdigit() else None
 
 
-def scan_medias(root: Union[str, Path]) -> MediaIndex:
+def scan_medias(root: Union[str, Path], mode: str = "medias") -> MediaIndex:
     """Walk ``root`` into a nested ``channel -> year -> month -> day -> [files]`` index.
 
-    Non-numeric year/month/day directories and non-media files (extensions
-    outside :data:`MEDIA_EXTS`) are ignored.
-    A missing ``root`` yields an empty index (graceful, never raises).
+    In "youtube" and "tiktok" modes, there is no day directory (the files sit directly
+    under month_dir), so they are stored under virtual day key 0.
+
+    Non-numeric directories and non-media files (extensions outside :data:`MEDIA_EXTS`)
+    are ignored. A missing ``root`` yields an empty index.
     """
     root = Path(root)
     index: MediaIndex = {}
     if not root.is_dir():
         return index
+
+    if mode not in ("medias", "youtube", "tiktok"):
+        raise ValueError(f"Invalid mode: {mode!r}")
 
     for channel_dir in sorted(p for p in root.iterdir() if p.is_dir()):
         channel = channel_dir.name
@@ -139,19 +144,28 @@ def scan_medias(root: Union[str, Path]) -> MediaIndex:
                 month = _int_or_none(month_dir.name)
                 if month is None:
                     continue
-                days: Dict[int, List[str]] = {}
-                for day_dir in sorted(p for p in month_dir.iterdir() if p.is_dir()):
-                    day = _int_or_none(day_dir.name)
-                    if day is None:
-                        continue
+
+                if mode in ("youtube", "tiktok"):
                     files = sorted(
-                        f.name for f in day_dir.iterdir()
+                        f.name for f in month_dir.iterdir()
                         if f.is_file() and f.suffix.lower() in MEDIA_EXTS
                     )
                     if files:
-                        days[day] = files
-                if days:
-                    months[month] = days
+                        months[month] = {0: files}
+                else:
+                    days: Dict[int, List[str]] = {}
+                    for day_dir in sorted(p for p in month_dir.iterdir() if p.is_dir()):
+                        day = _int_or_none(day_dir.name)
+                        if day is None:
+                            continue
+                        files = sorted(
+                            f.name for f in day_dir.iterdir()
+                            if f.is_file() and f.suffix.lower() in MEDIA_EXTS
+                        )
+                        if files:
+                            days[day] = files
+                    if days:
+                        months[month] = days
             if months:
                 years[year] = months
         if years:
@@ -185,6 +199,7 @@ def expand_selections(
     hours: Optional[Set[int]] = None,
     *,
     index: Optional[MediaIndex] = None,
+    mode: str = "medias",
 ) -> List[str]:
     """Expand coarse filters into a sorted list of relative media paths.
 
@@ -193,16 +208,18 @@ def expand_selections(
 
     Any filter passed as ``None`` (or an empty set) means "all" for that level.
     Paths are returned relative to ``root`` using forward slashes, e.g.
-    ``"al-oula/2024/06/01/20240601090000.mp3"``.
+    ``"al-oula/2024/06/01/20240601090000.mp3"`` in medias mode, or
+    ``"al-oula/2024/06/video_title.mp3"`` in youtube/tiktok modes.
 
     Args:
         root: medias root directory.
         channels: channel names to include, or ``None`` for all.
         years/months/days/hours: int sets to include, or ``None`` for all.
         index: a pre-built :func:`scan_medias` index (avoids re-walking disk).
+        mode: the ingestion platform structure: "medias", "youtube", or "tiktok".
     """
     if index is None:
-        index = scan_medias(root)
+        index = scan_medias(root, mode=mode)
 
     channel_filter = set(channels) if channels else None
     results: List[str] = []
@@ -217,15 +234,20 @@ def expand_selections(
                 if months and month not in months:
                     continue
                 for day, files in day_map.items():
-                    if days and day not in days:
+                    if mode not in ("youtube", "tiktok") and days and day not in days:
                         continue
                     for filename in files:
-                        if hours is not None:
+                        if mode not in ("youtube", "tiktok") and hours is not None:
                             h = hour_of(filename)
                             if h is None or h not in hours:
-                                continue
-                        results.append(
-                            f"{channel}/{year:04d}/{month:02d}/{day:02d}/{filename}"
-                        )
+                                  continue
+                        if mode in ("youtube", "tiktok"):
+                            results.append(
+                                f"{channel}/{year:04d}/{month:02d}/{filename}"
+                            )
+                        else:
+                            results.append(
+                                f"{channel}/{year:04d}/{month:02d}/{day:02d}/{filename}"
+                            )
     results.sort()
     return results
