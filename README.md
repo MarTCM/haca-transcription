@@ -59,26 +59,33 @@ python src/transcribe.py --input journal.mp3 --lang ar --out-dir out/
 | `--max-chunk-s` | `25`        | Max chunk length (seconds); chunks break only at silence.      |
 | `--overwrite`   | off         | Re-transcribe even if the `.srt` already exists.               |
 
-## Batch CLI (medias tree)
+## Batch CLI (medias/youtube/tiktok trees)
 
 `src/transcribe.py` handles a single file or a flat directory. For transcribing a
-structured archive, `cli.py` batches over a `medias/` tree and writes a mirrored
-`out/srt/` tree, with channel/date/hour filtering and a structured run log. It
-shares all transcription logic with the FastAPI backend (the Transcription UI) via
-the `core/` package, so the two stay in lock-step.
+structured archive, `cli.py` supports three ingestion modes:
+1. **`medias`** (default): Batches over a standard broadcast tree `medias/{channel}/{year}/{month}/{day}/{filename}.mp3` with day and hour filtering.
+2. **`youtube`**: Batches over a YouTube ingestion tree `youtube/{channel}/{year}/{month}/{filename}.mp3` (no day directory, day/hour filters are not supported).
+3. **`tiktok`**: Batches over a TikTok ingestion tree `tiktok/{channel}/{year}/{month}/{filename}.mp3` (no day directory, day/hour filters are not supported).
+
+It writes a mirrored `out/srt/` tree, with channel/date filtering and a structured run log. It shares all transcription logic with the FastAPI backend (the Transcription UI) via the `core/` package, so the two stay in lock-step.
 
 ```
-medias/{channel}/{year}/{month}/{day}/{YYYYMMDDHHMMSS}.mp3   # input
-out/srt/{channel}/{year}/{month}/{day}/{YYYYMMDDHHMMSS}.srt  # output (mirrors input)
+medias/{channel}/{year}/{month}/{day}/{YYYYMMDDHHMMSS}.mp3   # input (medias mode)
+out/srt/{channel}/{year}/{month}/{day}/{YYYYMMDDHHMMSS}.srt  # output (medias mode)
+
+youtube/{channel}/{year}/{month}/{video_title}.mp3            # input (youtube mode)
+out/srt/{channel}/{year}/{month}/{video_title}.srt            # output (youtube mode)
 ```
 
 ```bash
-# Dry-run: list the matched files, run no models.
+# Dry-run in default (medias) mode: list the matched files, run no models.
 python cli.py --channel al-oula --year 2024 --month 6 --hours 9-18 --dry-run
 
-# Transcribe two channels, all of June 2024, with the recommended defaults
-# (Darija-LoRA on: Arabic chunks → LoRA, French/English → base model).
-python cli.py --channel al-oula,2m --year 2024 --month 6
+# Dry-run in youtube mode (automatically scans under 'youtube' folder)
+python cli.py --mode youtube --channel 2MTV --year 2026 --dry-run
+
+# Transcribe in tiktok mode (automatically scans under 'tiktok' folder)
+python cli.py --mode tiktok --channel tv2m.officiel
 
 # Speaker annotation (WhisperX diarization); needs a Hugging Face token.
 python cli.py --channel 2m --year 2024 --month 6 --day 1 \
@@ -86,7 +93,8 @@ python cli.py --channel 2m --year 2024 --month 6 --day 1 \
 ```
 
 Filters (`--channel`, `--year`, `--month`, `--day`, `--hours`) accept lists and/or
-ranges (`9-18,21`); omit any to mean "all". `--speaker-annotation` is off by
+ranges (`9-18,21`); omit any to mean "all". Note that `--day` and `--hours` filters
+are rejected under `youtube` and `tiktok` modes. `--speaker-annotation` is off by
 default. See [`docs/CLI_ARCHITECTURE.md`](docs/CLI_ARCHITECTURE.md) for the full
 flag reference, the shared `core/` architecture, and every design decision.
 
