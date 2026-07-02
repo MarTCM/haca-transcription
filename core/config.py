@@ -68,6 +68,7 @@ class TranscribeConfig:
     # Defaulted-but-overridable model options.
     model: str = "large-v3"
     darija_lora: bool = True
+    darija_model: str = "large"
     language: str = "auto"
     allowed_langs: Tuple[str, ...] = DEFAULT_ALLOWED
     max_chunk_s: float = 25.0
@@ -82,8 +83,8 @@ class TranscribeConfig:
     max_speakers: Optional[int] = None
 
     # LoRA adapter.
-    lora_model: str = DEFAULT_LORA_MODEL
-    lora_base: str = DEFAULT_LORA_BASE
+    lora_model: Optional[str] = None
+    lora_base: Optional[str] = None
 
     def __post_init__(self) -> None:
         # Normalize allowed_langs to a tuple (callers may pass a list).
@@ -93,6 +94,20 @@ class TranscribeConfig:
             )
         else:
             self.allowed_langs = tuple(self.allowed_langs)
+
+        # Set default models based on darija_model
+        if self.darija_model == "small":
+            if self.model == "large-v3":
+                self.model = "small"
+            if self.lora_model is None:
+                self.lora_model = "ychafiqui/whisper-small-darija"
+            if self.lora_base is None:
+                self.lora_base = None
+        else:
+            if self.lora_model is None:
+                self.lora_model = DEFAULT_LORA_MODEL
+            if self.lora_base is None:
+                self.lora_base = DEFAULT_LORA_BASE
 
     # ------------------------------------------------------------------ #
     # Validation
@@ -117,6 +132,10 @@ class TranscribeConfig:
                     "speaker_annotation requires a Hugging Face token "
                     "(set hf_token or the HF_TOKEN environment variable)"
                 )
+        if self.darija_model not in ("large", "small"):
+            raise ConfigError(
+                f"darija_model must be 'large' or 'small', got {self.darija_model!r}"
+            )
         if self.max_chunk_s <= 0:
             raise ConfigError(f"max_chunk_s must be > 0, got {self.max_chunk_s}")
         if self.device not in ("auto", "cuda", "cpu"):

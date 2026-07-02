@@ -21,6 +21,7 @@ python cli.py --mode [medias|youtube|tiktok] [options]
 | `--out-dir` | `out/srt` | Output root directory where subtitle files mirror the input tree. |
 | `--pipeline` | `faster-whisper` | Core backend: `faster-whisper` or `whisperx`. |
 | `--model` | `large-v3` | Model size or local path (e.g. `large-v3`, `large-v3-turbo`, `tiny`). |
+| `--darija-model` | `large` | Darija model type: `large` (default, large-v3-turbo LoRA) or `small` (ychafiqui/whisper-small-darija). |
 | `--darija-lora` | Enabled | Route Arabic chunks through the Darija LoRA adapter. |
 | `--no-darija-lora` | Disabled | Disable the Darija LoRA; transcribe all chunks with base model. |
 | `--lang` | `auto` | Forced language code (`ar`, `fr`, `en`, `es`) or `auto` for per-chunk detection. |
@@ -68,6 +69,7 @@ python src/transcribe.py --input <file_or_dir> [options]
 | `--input` | *(Required)* | Path to a media file, or a flat directory of files. |
 | `--out-dir` | `out` | Where to write the `.srt` files. |
 | `--model` | `large-v3` | Model size or path. |
+| `--darija-model` | `large` | Darija model type: `large` or `small`. |
 | `--device` | `auto` | Compute device: `auto`, `cuda`, or `cpu`. |
 | `--lang` | `auto` | Forced language code (`ar`, `fr`...) or `auto` for per-chunk detection. |
 | `--allowed` | `ar,fr,en,es` | Allowed languages for auto-detection. |

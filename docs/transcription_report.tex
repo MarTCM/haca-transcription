@@ -784,6 +784,12 @@ Because language is decided per chunk, a single file can mix LoRA-transcribed
 Arabic segments with base-model French and English segments. The base model is
 never bypassed for non-Arabic content.
 
+\section{The Small Darija Model Alternative}
+
+For resource-constrained environments (such as CPU-only execution or systems with limited VRAM), the pipeline supports a lightweight alternative configuration via the \code{--darija-model small} flag. 
+
+When enabled, the routing engine swaps the large-v3-turbo base and LoRA adapter with the specialized \href{https://huggingface.co/ychafiqui/whisper-small-darija}{\code{ychafiqui/whisper-small-darija}} model. Because this is a fully fine-tuned model rather than a parameter-efficient adapter, it is loaded directly (with no base model required). Additionally, the default base model for non-Arabic chunks automatically degrades from \code{large-v3} to \code{small}, lowering the global memory and compute footprint while preserving reasonable transcription accuracy.
+
 % #############################################################################
 \chapter{The SRT Writer (\texttt{src/srt\_writer.py})}
 \label{ch:srt}
@@ -1002,7 +1008,9 @@ parse flags, build a config, expand the selection, then loop over
 Filters (\code{--channel}, \code{--year}, \code{--month}, \code{--day},
 \code{--hours}; the last also accepts the alias \code{--hour}) take lists and/or
 ranges, and any omitted filter means ``all''. \code{--speaker-annotation} is the
-headline option, off by default. The Darija LoRA is a mutually-exclusive
+headline option, off by default. The Darija model type can be chosen using the
+\code{--darija-model} flag (defaulting to \code{large}, or \code{small} for the
+lightweight pipeline). The Darija LoRA is a mutually-exclusive
 \code{--darija-lora}/\code{--no-darija-lora} pair defaulting to on. The remaining
 model options (\code{--pipeline}, \code{--model}, \code{--lang},
 \code{--allowed}, \code{--max-chunk-s}, \code{--device}, \code{--overwrite},
@@ -1289,6 +1297,7 @@ the medias filters.
 \code{--speaker-annotation} & \code{speaker\_annotation} & off & Diarization; implies WhisperX + token.\\
 \code{--pipeline} & \code{pipeline} & \code{faster-whisper} & \code{faster-whisper} or \code{whisperx}.\\
 \code{--model} & \code{model} & \code{large-v3} & Model size or local path.\\
+\code{--darija-model} & \code{darija\_model} & \code{large} & Choice: \code{large} (LoRA) or \code{small} (ychafiqui fine-tune).\\
 \code{--darija-lora}/\code{--no-darija-lora} & \code{darija\_lora} & on & Route \code{ar} chunks through the LoRA.\\
 \code{--lang} & \code{language} & \code{auto} & \code{auto} per-chunk, or a forced code.\\
 \code{--allowed} & \code{allowed\_langs} & \code{ar,fr,en} & Allow-list for auto detection.\\

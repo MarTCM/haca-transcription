@@ -86,3 +86,22 @@ def test_summary_str_contains_key_fields():
     assert "pipeline=faster-whisper" in s
     assert "darija_lora=true" in s
     assert "speaker_annotation=false" in s
+
+
+def test_darija_model_large_resolution():
+    cfg = TranscribeConfig(darija_model="large")
+    assert cfg.model == "large-v3"
+    assert cfg.lora_model == "anaszil/whisper-large-v3-turbo-darija"
+    assert cfg.lora_base == "openai/whisper-large-v3-turbo"
+
+
+def test_darija_model_small_resolution():
+    cfg = TranscribeConfig(darija_model="small")
+    assert cfg.model == "small"
+    assert cfg.lora_model == "ychafiqui/whisper-small-darija"
+    assert cfg.lora_base is None
+
+
+def test_darija_model_validation():
+    with pytest.raises(ConfigError, match="darija_model"):
+        TranscribeConfig(darija_model="tiny").validate()

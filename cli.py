@@ -93,6 +93,9 @@ def build_parser() -> argparse.ArgumentParser:
                    default=PIPELINE_FASTER_WHISPER, help="Transcription backend.")
     m.add_argument("--model", default="large-v3",
                    help="faster-whisper model size or local path.")
+    m.add_argument("--darija-model", choices=["large", "small"], default="large",
+                   help="Select the Darija model type for Arabic chunks: 'large' (large-v3-turbo LoRA) "
+                        "or 'small' (ychafiqui/whisper-small-darija).")
     lora = m.add_mutually_exclusive_group()
     lora.add_argument("--darija-lora", dest="darija_lora", action="store_true",
                       default=True,
@@ -145,6 +148,7 @@ def config_from_args(args: argparse.Namespace) -> TranscribeConfig:
         hf_token=hf_token,
         model=args.model,
         darija_lora=args.darija_lora,
+        darija_model=args.darija_model,
         language=args.lang,
         allowed_langs=args.allowed,
         max_chunk_s=args.max_chunk_s,

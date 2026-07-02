@@ -182,3 +182,17 @@ def test_cli_dry_run_youtube_mode(tmp_path, capsys):
     assert rc == cli.EXIT_OK
     out = capsys.readouterr().out.splitlines()
     assert "mychannel/2024/06/video_title.mp3" in out
+
+
+def test_darija_model_cli_parsing():
+    args = cli.build_parser().parse_args(["--darija-model", "small"])
+    cfg = cli.config_from_args(args)
+    assert cfg.darija_model == "small"
+    assert cfg.model == "small"
+    assert cfg.lora_model == "ychafiqui/whisper-small-darija"
+    assert cfg.lora_base is None
+
+    args_large = cli.build_parser().parse_args([])
+    cfg_large = cli.config_from_args(args_large)
+    assert cfg_large.darija_model == "large"
+    assert cfg_large.model == "large-v3"

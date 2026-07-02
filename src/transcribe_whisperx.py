@@ -203,10 +203,10 @@ _darija_lora_cache = None
 
 def _load_darija_lora(
     lora_model: str = "anaszil/whisper-large-v3-turbo-darija",
-    lora_base: str = "openai/whisper-large-v3-turbo",
+    lora_base: Optional[str] = "openai/whisper-large-v3-turbo",
     device: Optional[str] = None,
 ):
-    """Load the anaszil LoRA adapter as a singleton HF pipeline."""
+    """Load the Darija model (either LoRA adapter or full fine-tune) as a singleton HF pipeline."""
     global _darija_lora_cache
     if _darija_lora_cache is not None:
         return _darija_lora_cache
@@ -226,17 +226,31 @@ def _load_darija_lora(
     if device in (None, "auto"):
         device = _auto_device()
     dtype = torch.float16 if device == "cuda" else torch.float32
-    print(
-        f"[lora] loading adapter={lora_model} base={lora_base} device={device}",
-        file=sys.stderr,
-    )
-    base = WhisperForConditionalGeneration.from_pretrained(
-        lora_base, torch_dtype=dtype, low_cpu_mem_usage=True,
-    )
-    model = PeftModel.from_pretrained(base, lora_model)
-    processor = WhisperProcessor.from_pretrained(
-        lora_base, language="Arabic", task="transcribe",
-    )
+
+    if lora_base:
+        print(
+            f"[lora] loading adapter={lora_model} base={lora_base} device={device}",
+            file=sys.stderr,
+        )
+        base = WhisperForConditionalGeneration.from_pretrained(
+            lora_base, torch_dtype=dtype, low_cpu_mem_usage=True,
+        )
+        model = PeftModel.from_pretrained(base, lora_model)
+        processor = WhisperProcessor.from_pretrained(
+            lora_base, language="Arabic", task="transcribe",
+        )
+    else:
+        print(
+            f"[darija-model] loading full model={lora_model} device={device}",
+            file=sys.stderr,
+        )
+        model = WhisperForConditionalGeneration.from_pretrained(
+            lora_model, torch_dtype=dtype, low_cpu_mem_usage=True,
+        )
+        processor = WhisperProcessor.from_pretrained(
+            lora_model, language="Arabic", task="transcribe",
+        )
+
     pipe = pipeline(
         "automatic-speech-recognition",
         model=model,
@@ -509,12 +523,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--batch-size", type=int, default=8,
                     help="WhisperX batch size (default: 8).")
     ap.add_argument("--beam-size", type=int, default=5)
+    ap.add_argument("--darija-model", choices=["large", "small"], default="large",
+                   help="Select the Darija model type for Arabic chunks: 'large' (large-v3-turbo LoRA) "
+                        "or 'small' (ychafiqui/whisper-small-darija).")
     ap.add_argument("--darija-lora", action="store_true",
                     help="Route Arabic chunks through anaszil LoRA adapter for better Darija ASR.")
-    ap.add_argument("--lora-model", default="anaszil/whisper-large-v3-turbo-darija",
-                    help="LoRA adapter model (default: anaszil/whisper-large-v3-turbo-darija).")
-    ap.add_argument("--lora-base", default="openai/whisper-large-v3-turbo",
-                    help="Base model for the LoRA adapter (default: openai/whisper-large-v3-turbo).")
+    ap.add_argument("--lora-model", default=None,
+                    help="Darija/LoRA model (defaults to large/small choice if not set).")
+    ap.add_argument("--lora-base", default=None,
+                    help="Base model for the LoRA adapter (defaults to large base, None for small choice).")
     ap.add_argument("--diarize", action="store_true",
                     help="Enable pyannote speaker diarization.")
     ap.add_argument("--hf-token", default=None,
@@ -526,6 +543,18 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--overwrite", action="store_true",
                     help="Re-transcribe even if .srt exists.")
     args = ap.parse_args(argv)
+
+    # Resolve default models based on --darija-model choice
+    if args.darija_model == "small":
+        if args.model == "large-v3":
+            args.model = "small"
+        if args.lora_model is None:
+            args.lora_model = "ychafiqui/whisper-small-darija"
+    else:
+        if args.lora_model is None:
+            args.lora_model = "anaszil/whisper-large-v3-turbo-darija"
+        if args.lora_base is None:
+            args.lora_base = "openai/whisper-large-v3-turbo"
 
     input_path = Path(args.input)
     if not input_path.exists():
