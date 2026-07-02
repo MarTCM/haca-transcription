@@ -58,7 +58,7 @@ class FakeTikTokYDL:
         if self.produce_file and "paths" in self.opts:
             d = Path(self.opts["paths"]["home"])
             d.mkdir(parents=True, exist_ok=True)
-            stem = self.opts["outtmpl"]["default"].replace("%(ext)s", "mp3")
+            stem = self.opts["outtmpl"]["default"].replace("%(ext)s", "mp4")
             (d / stem).write_text("audio")
 
 
@@ -68,6 +68,13 @@ def fake_ydl():
     FakeTikTokYDL.downloaded = []
     FakeTikTokYDL.produce_file = True
     return FakeTikTokYDL
+
+
+@pytest.fixture(autouse=True)
+def mock_ffmpeg(monkeypatch):
+    def fake_extract(video_path, audio_path, audio_format):
+        audio_path.write_text("mock audio")
+    monkeypatch.setattr(ft, "_ffmpeg_extract_audio", fake_extract)
 
 
 def _cfg(tmp_path, **kw):
@@ -200,16 +207,15 @@ def test_build_ydl_list_opts_with_playlistend_and_cookies(tmp_path):
     assert opts["cookiefile"] == str(cf)
 
 
-def test_build_ydl_audio_opts_escapes_percent():
-    opts = ft.build_ydl_audio_opts(Path("/tmp"), "100% real", "mp3")
+def test_build_ydl_video_opts_escapes_percent():
+    opts = ft.build_ydl_video_opts(Path("/tmp"), "100% real")
     assert opts["outtmpl"] == {"default": "100%% real.%(ext)s"}
 
 
-def test_build_ydl_audio_opts_format_and_postprocessor():
-    opts = ft.build_ydl_audio_opts(Path("/tmp"), "t", "mp3")
-    assert opts["format"] == "bestaudio/best"
-    assert opts["postprocessors"][0]["key"] == "FFmpegExtractAudio"
-    assert opts["postprocessors"][0]["preferredcodec"] == "mp3"
+def test_build_ydl_video_opts_format():
+    opts = ft.build_ydl_video_opts(Path("/tmp"), "t")
+    assert opts["format"] == "play/worst[vcodec^=h264]/worst[vcodec!=none]/bestaudio/best"
+    assert "postprocessors" not in opts
 
 
 # --------------------------------------------------------------------------- #
